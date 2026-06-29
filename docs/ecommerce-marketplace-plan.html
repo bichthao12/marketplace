@@ -1,0 +1,3778 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ecommerce Marketplace Plan</title>
+  <style>
+    @media print {
+      body { font-size: 11pt; }
+      pre, table { page-break-inside: avoid; }
+      h1, h2, h3 { page-break-after: avoid; }
+    }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      line-height: 1.55;
+      max-width: 900px;
+      margin: 2rem auto;
+      padding: 0 1.5rem 3rem;
+      color: #1a1a1a;
+    }
+    h1 { border-bottom: 2px solid #2563eb; padding-bottom: 0.3em; }
+    h2 { margin-top: 2em; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.2em; }
+    h3 { margin-top: 1.5em; }
+    code { background: #f3f4f6; padding: 0.15em 0.35em; border-radius: 4px; font-size: 0.9em; }
+    pre { background: #111827; color: #f9fafb; padding: 1rem; overflow-x: auto; border-radius: 8px; }
+    pre code { background: none; padding: 0; color: inherit; }
+    table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.92em; }
+    th, td { border: 1px solid #d1d5db; padding: 0.45em 0.6em; text-align: left; }
+    th { background: #f3f4f6; }
+    blockquote { border-left: 4px solid #2563eb; margin: 1em 0; padding: 0.25em 1em; color: #374151; background: #f8fafc; }
+    .print-hint {
+      background: #eff6ff;
+      border: 1px solid #93c5fd;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 2rem;
+      font-size: 0.95rem;
+    }
+    @media print { .print-hint { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="print-hint">
+  <strong>Export PDF:</strong> Nhấn <kbd>Ctrl+P</kbd> → chọn <em>Save as PDF</em> / <em>Lưu thành PDF</em>.
+  </div>
+  <h1>Plan chi tiết: Web App Ecommerce Marketplace (MVP)</h1>
+<h2>1. Tổng quan sản phẩm</h2>
+<p><strong>Mục tiêu MVP:</strong> Người mua duyệt sản phẩm từ nhiều seller, thêm giỏ hàng, thanh toán, theo dõi đơn; seller quản lý shop/sản phẩm/đơn; admin platform duyệt seller và giám sát hệ thống.</p>
+<p><strong>Không nằm trong MVP (phase sau):</strong> Reviews, wishlist, coupon nâng cao, loyalty, multi-warehouse, chat seller-buyer, recommendation AI.</p>
+<pre><code class="language-mermaid">flowchart TB
+  subgraph clients [Clients]
+    BuyerApp[Buyer_React_App]
+    SellerApp[Seller_React_App]
+    AdminApp[Admin_React_App]
+  end
+
+  subgraph backend [Spring_Boot_API]
+    Gateway[API_Gateway_Layer]
+    AuthSvc[Auth_Service]
+    CatalogSvc[Catalog_Service]
+    CartSvc[Cart_Service]
+    OrderSvc[Order_Service]
+    PaymentSvc[Payment_Service]
+    SellerSvc[Seller_Service]
+  end
+
+  subgraph infra [Infrastructure]
+  DB[(PostgreSQL)]
+  Redis[(Redis)]
+  S3[Object_Storage]
+  Queue[Message_Queue]
+  end
+
+  BuyerApp --&gt; Gateway
+  SellerApp --&gt; Gateway
+  AdminApp --&gt; Gateway
+  Gateway --&gt; AuthSvc
+  Gateway --&gt; CatalogSvc
+  Gateway --&gt; CartSvc
+  Gateway --&gt; OrderSvc
+  Gateway --&gt; PaymentSvc
+  Gateway --&gt; SellerSvc
+  AuthSvc --&gt; DB
+  CatalogSvc --&gt; DB
+  CartSvc --&gt; Redis
+  OrderSvc --&gt; DB
+  PaymentSvc --&gt; DB
+  SellerSvc --&gt; DB
+  CatalogSvc --&gt; S3
+  OrderSvc --&gt; Queue
+  PaymentSvc --&gt; Queue
+</code></pre>
+<hr>
+<h2>2. Kiến trúc kỹ thuật</h2>
+<h3>Backend — Spring Boot (monolith modular cho MVP)</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Công nghệ</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Framework</td>
+<td>Spring Boot 3.x, Java 21</td>
+</tr>
+<tr>
+<td>API</td>
+<td>REST + OpenAPI (Springdoc)</td>
+</tr>
+<tr>
+<td>Security</td>
+<td>Spring Security + JWT (access) + refresh token</td>
+</tr>
+<tr>
+<td>DB</td>
+<td>PostgreSQL 16</td>
+</tr>
+<tr>
+<td>Cache</td>
+<td>Redis (session cart, rate limit)</td>
+</tr>
+<tr>
+<td>ORM</td>
+<td>Spring Data JPA + Flyway migrations</td>
+</tr>
+<tr>
+<td>File</td>
+<td>AWS S3 / MinIO (ảnh sản phẩm)</td>
+</tr>
+<tr>
+<td>Async</td>
+<td>Spring Events hoặc RabbitMQ (email, webhook payment)</td>
+</tr>
+<tr>
+<td>Search</td>
+<td>PostgreSQL full-text (MVP); Elasticsearch (phase 2)</td>
+</tr>
+</tbody></table>
+<p><strong>Cấu trúc package đề xuất:</strong></p>
+<pre><code>backend/
+  src/main/java/com/marketplace/
+    config/          # Security, CORS, Redis
+    auth/            # Login, register, JWT
+    user/            # User profile, addresses
+    seller/          # Shop, KYC, seller dashboard
+    catalog/         # Category, product, variant, inventory
+    cart/            # Cart, cart items
+    order/           # Checkout, order, order items, status
+    payment/         # Stripe, VNPay, Momo adapters
+    shipping/        # Rate calc, carrier integration
+    admin/           # Platform moderation
+    common/          # DTO, exception, util
+</code></pre>
+<h3>Frontend — React</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Công nghệ</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Framework</td>
+<td>React 18 + TypeScript</td>
+</tr>
+<tr>
+<td>Build</td>
+<td>Vite</td>
+</tr>
+<tr>
+<td>Routing</td>
+<td>React Router v6</td>
+</tr>
+<tr>
+<td>State</td>
+<td>TanStack Query (server) + Zustand (cart UI)</td>
+</tr>
+<tr>
+<td>UI</td>
+<td>Tailwind CSS + shadcn/ui</td>
+</tr>
+<tr>
+<td>Forms</td>
+<td>React Hook Form + Zod</td>
+</tr>
+<tr>
+<td>i18n</td>
+<td>react-i18next (vi/en)</td>
+</tr>
+<tr>
+<td>Payment</td>
+<td>Stripe.js (global), redirect VNPay/Momo</td>
+</tr>
+</tbody></table>
+<p><strong>3 app shell (có thể 1 repo monorepo):</strong></p>
+<pre><code>frontend/
+  apps/
+    buyer/       # Trang mua hàng công khai
+    seller/      # Portal seller (protected)
+    admin/       # Portal admin (protected)
+  packages/
+    ui/          # Shared components
+    api-client/  # Generated từ OpenAPI
+    types/       # Shared TypeScript types
+</code></pre>
+<hr>
+<h2>3. Vai trò người dùng &amp; quyền</h2>
+<pre><code class="language-mermaid">flowchart LR
+  Guest --&gt; Buyer
+  Buyer --&gt; Seller
+  Seller --&gt; Admin
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Quyền chính</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Guest</strong></td>
+<td>Xem catalog, search, xem chi tiết SP</td>
+</tr>
+<tr>
+<td><strong>Buyer</strong></td>
+<td>Giỏ hàng, checkout, đơn hàng, địa chỉ, profile</td>
+</tr>
+<tr>
+<td><strong>Seller</strong></td>
+<td>CRUD sản phẩm shop mình, xem/fulfill đơn của shop</td>
+</tr>
+<tr>
+<td><strong>Admin</strong></td>
+<td>Duyệt seller, suspend shop, xem toàn bộ đơn, cấu hình category</td>
+</tr>
+</tbody></table>
+<p><strong>Lưu ý marketplace:</strong> Một user có thể vừa là Buyer vừa là Seller (role kép).</p>
+<hr>
+<h2>4. Danh mục chức năng chi tiết</h2>
+<h3>4.1 Ma trận chức năng theo module</h3>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Chức năng</th>
+<th>Actor</th>
+<th>MVP</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Auth</strong></td>
+<td>Đăng ký email/password</td>
+<td>Guest</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Đăng nhập / đăng xuất</td>
+<td>All</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Refresh token</td>
+<td>All</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Quên mật khẩu (email reset)</td>
+<td>Guest</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Gán role BUYER / SELLER</td>
+<td>User</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Profile</strong></td>
+<td>Xem/sửa thông tin cá nhân</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Quản lý sổ địa chỉ (CRUD, đặt mặc định)</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Catalog (public)</strong></td>
+<td>Duyệt danh mục dạng cây</td>
+<td>Guest</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Listing sản phẩm (filter, sort, pagination)</td>
+<td>Guest</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Tìm kiếm full-text theo tên/mô tả</td>
+<td>Guest</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Chi tiết sản phẩm + chọn variant</td>
+<td>Guest</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Xem trang shop seller (public)</td>
+<td>Guest</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Cart</strong></td>
+<td>Thêm/sửa/xóa item trong giỏ</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Giỏ guest (session) merge khi login</td>
+<td>Guest→Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Kiểm tra tồn kho realtime</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Validate không trộn currency</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Checkout</strong></td>
+<td>Chọn địa chỉ giao hàng</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Tính phí ship theo vùng (flat rate)</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Tóm tắt đơn tách theo seller</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Chọn phương thức thanh toán</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Order</strong></td>
+<td>Tạo đơn + order_groups</td>
+<td>System</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Lịch sử đơn hàng</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Chi tiết đơn (tổng + từng seller group)</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Hủy đơn (trước khi ship, rule giới hạn)</td>
+<td>Buyer</td>
+<td>Phase 1.5</td>
+</tr>
+<tr>
+<td><strong>Payment</strong></td>
+<td>Stripe (card, USD/EUR)</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>VNPay redirect (VND)</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Momo redirect (VND)</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>COD — xác nhận thu tiền khi giao</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Webhook xử lý idempotent</td>
+<td>System</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Shipping</strong></td>
+<td>Seller nhập tracking number</td>
+<td>Seller</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Buyer xem trạng thái vận chuyển</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Rate quote API (FedEx/UPS/USPS)</td>
+<td>System</td>
+<td>Phase 2</td>
+</tr>
+<tr>
+<td><strong>Seller</strong></td>
+<td>Đăng ký mở shop</td>
+<td>Buyer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Dashboard (đơn mới, doanh thu)</td>
+<td>Seller</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>CRUD sản phẩm + variant + inventory</td>
+<td>Seller</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Upload ảnh sản phẩm</td>
+<td>Seller</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Quản lý đơn hàng của shop</td>
+<td>Seller</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Cập nhật trạng thái fulfill</td>
+<td>Seller</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Admin</strong></td>
+<td>Duyệt/từ chối/suspend seller</td>
+<td>Admin</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Moderation sản phẩm (optional)</td>
+<td>Admin</td>
+<td>Optional</td>
+</tr>
+<tr>
+<td></td>
+<td>CRUD danh mục toàn platform</td>
+<td>Admin</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Xem tất cả đơn hàng</td>
+<td>Admin</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Tìm kiếm user/seller</td>
+<td>Admin</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Audit log hành động admin</td>
+<td>Admin</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Notification</strong></td>
+<td>Email xác nhận đơn</td>
+<td>System</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Email seller có đơn mới</td>
+<td>System</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td></td>
+<td>Email duyệt/từ chối shop</td>
+<td>System</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<h3>4.2 Phân rã chức năng theo portal</h3>
+<p><strong>Buyer portal</strong></p>
+<ul>
+<li>Trang chủ: banner, danh mục nổi bật, sản phẩm mới</li>
+<li>PLP (Product Listing Page): filter theo category, giá, seller; sort theo giá/mới nhất</li>
+<li>PDP (Product Detail Page): gallery ảnh, variant picker, stock indicator, nút &quot;Thêm giỏ&quot;</li>
+<li>Cart: nhóm item theo seller, hiển thị subtotal từng shop</li>
+<li>Checkout 3 bước: (1) địa chỉ → (2) shipping + review → (3) payment</li>
+<li>Account: profile, addresses, orders</li>
+</ul>
+<p><strong>Seller portal</strong></p>
+<ul>
+<li>Onboarding wizard: thông tin shop → submit → chờ duyệt</li>
+<li>Product manager: list/draft/create/edit, bulk status change</li>
+<li>Order inbox: tab New / Processing / Shipped / Completed</li>
+<li>Fulfillment: confirm → pack → nhập tracking → mark shipped</li>
+</ul>
+<p><strong>Admin portal</strong></p>
+<ul>
+<li>Seller queue: pending applications với approve/reject + lý do</li>
+<li>Order monitor: search by order ID, buyer email, seller</li>
+<li>Category tree editor: drag-drop (optional) hoặc form parent/child</li>
+<li>System overview: tổng đơn, seller active, GMV đơn giản</li>
+</ul>
+<hr>
+<h2>5. Use cases chi tiết</h2>
+<p>Quy ước: <strong>UC-[Actor]-[ID]</strong> | Priority: P0 = bắt buộc MVP, P1 = nên có, P2 = phase sau</p>
+<h3>5.1 Guest / Buyer</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Tên</th>
+<th>Actor</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UC-GST-001</td>
+<td>Duyệt danh mục sản phẩm</td>
+<td>Guest</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-GST-002</td>
+<td>Tìm kiếm sản phẩm</td>
+<td>Guest</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-GST-003</td>
+<td>Xem chi tiết sản phẩm và variant</td>
+<td>Guest</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-001</td>
+<td>Đăng ký tài khoản</td>
+<td>Guest</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-002</td>
+<td>Đăng nhập / đăng xuất</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-003</td>
+<td>Quên mật khẩu</td>
+<td>Guest</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-004</td>
+<td>Quản lý profile và địa chỉ</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-005</td>
+<td>Thêm sản phẩm vào giỏ hàng</td>
+<td>Buyer/Guest</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-006</td>
+<td>Cập nhật/xóa item trong giỏ</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-007</td>
+<td>Merge giỏ guest sau khi login</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-008</td>
+<td>Checkout đa seller</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-009</td>
+<td>Thanh toán online (Stripe/VNPay/Momo)</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-010</td>
+<td>Thanh toán COD</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-011</td>
+<td>Xem lịch sử và chi tiết đơn hàng</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-012</td>
+<td>Theo dõi trạng thái vận chuyển</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-BUY-013</td>
+<td>Hủy đơn (trước processing)</td>
+<td>Buyer</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>UC-BUY-014</td>
+<td>Đăng ký mở shop (seller onboarding)</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+</tbody></table>
+<h4>UC-BUY-005 — Thêm sản phẩm vào giỏ hàng</h4>
+<ul>
+<li><strong>Mô tả:</strong> Buyer chọn variant và số lượng, thêm vào giỏ.</li>
+<li><strong>Tiền điều kiện:</strong> Sản phẩm <code>active</code>; variant còn hàng; seller <code>approved</code>.</li>
+<li><strong>Luồng chính:</strong><ol>
+<li>Buyer chọn variant (size/color) và quantity trên PDP</li>
+<li>Hệ thống kiểm tra <code>available_qty = quantity - reserved_qty &gt;= requested</code></li>
+<li>Nếu giỏ đã có item khác currency → từ chối, báo lỗi</li>
+<li>Thêm/update cart_item; tăng <code>reserved_qty</code> (TTL 30 phút)</li>
+<li>Trả về cart summary cập nhật</li>
+</ol>
+</li>
+<li><strong>Luồng thay thế:</strong><ul>
+<li>2a. Hết hàng → hiển thị &quot;Hết hàng&quot;, không thêm</li>
+<li>3a. Khác currency → &quot;Giỏ hàng chỉ hỗ trợ một loại tiền tệ&quot;</li>
+</ul>
+</li>
+<li><strong>Hậu điều kiện:</strong> Cart có item mới; inventory reserved tạm thời</li>
+</ul>
+<h4>UC-BUY-008 — Checkout đa seller</h4>
+<ul>
+<li><strong>Mô tả:</strong> Buyer thanh toán một lần cho giỏ có sản phẩm từ nhiều seller.</li>
+<li><strong>Tiền điều kiện:</strong> Đã login; giỏ không rỗng; tất cả item còn đủ stock.</li>
+<li><strong>Luồng chính:</strong><ol>
+<li>Buyer vào checkout, chọn địa chỉ giao hàng</li>
+<li>Hệ thống nhóm cart_items theo <code>seller_id</code></li>
+<li>Tính <code>shipping_fee</code> riêng cho từng seller group theo vùng địa chỉ</li>
+<li>Hiển thị breakdown: subtotal/seller + ship + grand total</li>
+<li>Buyer chọn payment method</li>
+<li><code>POST /checkout</code> → tạo <code>order</code> + N <code>order_groups</code> + <code>payment</code> record</li>
+<li>Chuyển sang luồng thanh toán tương ứng</li>
+</ol>
+</li>
+<li><strong>Luồng thay thế:</strong><ul>
+<li>1a. Chưa có địa chỉ → bắt buộc tạo địa chỉ mới</li>
+<li>6a. Stock thay đổi → rollback, báo item nào hết hàng</li>
+</ul>
+</li>
+<li><strong>Hậu điều kiện:</strong> Order ở trạng thái <code>pending_payment</code>; inventory hard-lock</li>
+</ul>
+<h4>UC-BUY-009 — Thanh toán online</h4>
+<ul>
+<li><strong>Tiền điều kiện:</strong> Order <code>pending_payment</code>; chưa quá timeout (15 phút)</li>
+<li><strong>Luồng chính (Stripe):</strong><ol>
+<li>Backend tạo Stripe PaymentIntent với <code>amount</code>, <code>currency</code>, <code>metadata.orderId</code></li>
+<li>Frontend hiển thị Stripe Elements</li>
+<li>Buyer nhập card → confirm</li>
+<li>Stripe gửi webhook <code>payment_intent.succeeded</code></li>
+<li>Backend verify signature → cập nhật <code>payment=success</code>, <code>order=paid</code></li>
+<li>Trừ inventory thật; gửi email xác nhận; notify seller</li>
+</ol>
+</li>
+<li><strong>Luồng chính (VNPay/Momo):</strong><ol>
+<li>Backend tạo payment URL với order reference</li>
+<li>Redirect buyer sang cổng thanh toán</li>
+<li>Buyer thanh toán → callback IPN/webhook</li>
+<li>Backend verify checksum → cập nhật trạng thái tương tự bước 5–6 Stripe</li>
+</ol>
+</li>
+<li><strong>Luồng thay thế:</strong><ul>
+<li>4a/3a. Thanh toán fail → <code>payment=failed</code>, release inventory sau grace period</li>
+<li>4b. Webhook trễ → reconciliation job quét trạng thái từ provider</li>
+</ul>
+</li>
+</ul>
+<h4>UC-BUY-010 — Thanh toán COD</h4>
+<ul>
+<li><strong>Luồng chính:</strong><ol>
+<li>Buyer chọn COD tại checkout</li>
+<li>Order chuyển <code>payment_status=awaiting_cod</code>, <code>status=confirmed</code></li>
+<li>Seller fulfill bình thường</li>
+<li>Khi giao hàng thành công, seller/admin mark <code>payment=captured</code></li>
+</ol>
+</li>
+<li><strong>Ràng buộc MVP:</strong> Chỉ áp dụng địa chỉ VN; có thể giới hạn <code>order.total</code> tối đa (vd. 10M VND)</li>
+</ul>
+<h3>5.2 Seller</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Tên</th>
+<th>Actor</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UC-SEL-001</td>
+<td>Đăng ký mở shop</td>
+<td>Buyer</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SEL-002</td>
+<td>Cập nhật thông tin shop</td>
+<td>Seller</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SEL-003</td>
+<td>Tạo sản phẩm (draft)</td>
+<td>Seller</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SEL-004</td>
+<td>Publish sản phẩm lên marketplace</td>
+<td>Seller</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SEL-005</td>
+<td>Quản lý variant và tồn kho</td>
+<td>Seller</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SEL-006</td>
+<td>Upload/xóa ảnh sản phẩm</td>
+<td>Seller</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SEL-007</td>
+<td>Nhận thông báo đơn mới</td>
+<td>Seller</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SEL-008</td>
+<td>Xác nhận và xử lý đơn</td>
+<td>Seller</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SEL-009</td>
+<td>Nhập tracking và mark shipped</td>
+<td>Seller</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SEL-010</td>
+<td>Mark delivered (hoặc auto sau N ngày)</td>
+<td>Seller/System</td>
+<td>P1</td>
+</tr>
+</tbody></table>
+<h4>UC-SEL-001 — Đăng ký mở shop</h4>
+<ul>
+<li><strong>Tiền điều kiện:</strong> User đã login; chưa có seller profile hoặc profile bị rejected</li>
+<li><strong>Luồng chính:</strong><ol>
+<li>Buyer chọn &quot;Trở thành người bán&quot;</li>
+<li>Điền: tên shop, mô tả, loại hình (cá nhân/doanh nghiệp), SĐT, địa chỉ kho</li>
+<li>Upload giấy tờ (CMND/GPKD) — MVP: 1–2 file</li>
+<li>Submit → <code>seller_profile.status = pending</code></li>
+<li>Gửi email &quot;Đang chờ duyệt&quot;</li>
+</ol>
+</li>
+<li><strong>Hậu điều kiện:</strong> Seller chưa được phép listing sản phẩm cho đến khi approved</li>
+</ul>
+<h4>UC-SEL-008 — Xác nhận và xử lý đơn</h4>
+<ul>
+<li><strong>Tiền điều kiện:</strong> <code>order_group.status = paid</code> (hoặc <code>confirmed</code> với COD); thuộc shop của seller</li>
+<li><strong>Luồng chính:</strong><ol>
+<li>Seller mở order inbox, thấy đơn mới</li>
+<li>Xem chi tiết: items, địa chỉ giao (masked phone nếu cần), ghi chú buyer</li>
+<li>Seller bấm &quot;Xác nhận&quot; → <code>order_group.status = processing</code></li>
+<li>Đóng gói hàng</li>
+<li>Chuyển sang UC-SEL-009 (shipped)</li>
+</ol>
+</li>
+<li><strong>Luồng thay thế:</strong>
+2a. Hết hàng sau khi đặt → seller liên hệ buyer/admin; admin có thể cancel partial (P1)</li>
+</ul>
+<h4>UC-SEL-009 — Nhập tracking và mark shipped</h4>
+<ul>
+<li><strong>Luồng chính:</strong><ol>
+<li>Seller chọn carrier (GHN, GHTK, FedEx, Other)</li>
+<li>Nhập <code>tracking_number</code></li>
+<li>Submit → tạo <code>shipment</code> record; <code>order_group.status = shipped</code></li>
+<li>Gửi email cho buyer kèm link tracking (nếu carrier hỗ trợ)</li>
+</ol>
+</li>
+</ul>
+<h3>5.3 Admin</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Tên</th>
+<th>Actor</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UC-ADM-001</td>
+<td>Duyệt đơn đăng ký seller</td>
+<td>Admin</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-ADM-002</td>
+<td>Suspend / reactivate seller</td>
+<td>Admin</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-ADM-003</td>
+<td>Quản lý cây danh mục</td>
+<td>Admin</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-ADM-004</td>
+<td>Moderation sản phẩm vi phạm</td>
+<td>Admin</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>UC-ADM-005</td>
+<td>Tra cứu đơn hàng toàn platform</td>
+<td>Admin</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-ADM-006</td>
+<td>Can thiệp trạng thái đơn (dispute)</td>
+<td>Admin</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>UC-ADM-007</td>
+<td>Xem audit log</td>
+<td>Admin</td>
+<td>P0</td>
+</tr>
+</tbody></table>
+<h4>UC-ADM-001 — Duyệt seller</h4>
+<ul>
+<li><strong>Luồng chính:</strong><ol>
+<li>Admin mở queue <code>status=pending</code></li>
+<li>Xem hồ sơ shop + tài liệu đính kèm</li>
+<li>Approve → <code>status=approved</code>, gán role SELLER cho user, email thông báo</li>
+<li>Hoặc Reject → nhập lý do, <code>status=rejected</code>, email thông báo</li>
+</ol>
+</li>
+<li><strong>Hậu điều kiện:</strong> Seller approved có thể tạo và publish sản phẩm</li>
+</ul>
+<h3>5.4 System (tự động)</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Tên</th>
+<th>Trigger</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UC-SYS-001</td>
+<td>Release inventory reservation hết hạn</td>
+<td>Cron mỗi 5 phút</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SYS-002</td>
+<td>Hủy order payment timeout</td>
+<td>Order pending &gt; 15 phút</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SYS-003</td>
+<td>Payment reconciliation</td>
+<td>Cron mỗi 15 phút</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SYS-004</td>
+<td>Gửi email notification</td>
+<td>Order/payment events</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>UC-SYS-005</td>
+<td>Auto complete order sau delivered + 7 ngày</td>
+<td>Cron daily</td>
+<td>P1</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>6. Luồng nghiệp vụ chi tiết</h2>
+<h3>6.1 State machine — Order (cấp buyer)</h3>
+<pre><code class="language-mermaid">stateDiagram-v2
+  [*] --&gt; pending_payment: checkout_created
+  pending_payment --&gt; paid: payment_success
+  pending_payment --&gt; cancelled: timeout_or_user_cancel
+  pending_payment --&gt; awaiting_cod: cod_selected
+  awaiting_cod --&gt; confirmed: cod_confirmed
+  paid --&gt; confirmed: auto
+  confirmed --&gt; completed: all_groups_delivered
+  confirmed --&gt; cancelled: admin_cancel
+  cancelled --&gt; [*]
+  completed --&gt; [*]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Trạng thái</th>
+<th>Ý nghĩa</th>
+<th>Ai thấy</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pending_payment</code></td>
+<td>Đã tạo đơn, chờ thanh toán online</td>
+<td>Buyer</td>
+</tr>
+<tr>
+<td><code>awaiting_cod</code></td>
+<td>COD, chờ giao hàng thu tiền</td>
+<td>Buyer, Seller</td>
+</tr>
+<tr>
+<td><code>paid</code></td>
+<td>Thanh toán online thành công</td>
+<td>All</td>
+</tr>
+<tr>
+<td><code>confirmed</code></td>
+<td>Đơn hợp lệ, seller bắt đầu xử lý</td>
+<td>All</td>
+</tr>
+<tr>
+<td><code>completed</code></td>
+<td>Tất cả seller groups đã delivered</td>
+<td>Buyer</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>Đã hủy</td>
+<td>All</td>
+</tr>
+</tbody></table>
+<h3>6.2 State machine — OrderGroup (cấp seller)</h3>
+<pre><code class="language-mermaid">stateDiagram-v2
+  [*] --&gt; new: payment_confirmed
+  new --&gt; processing: seller_confirm
+  processing --&gt; shipped: tracking_added
+  shipped --&gt; delivered: delivery_confirmed
+  new --&gt; cancelled: cancel_before_processing
+  processing --&gt; cancelled: admin_cancel
+  delivered --&gt; [*]
+  cancelled --&gt; [*]
+</code></pre>
+<p>Mỗi seller chỉ điều khiển group của mình. Order cha <code>completed</code> khi <strong>tất cả</strong> groups = <code>delivered</code> hoặc <code>cancelled</code> (với refund logic P1).</p>
+<h3>6.3 State machine — SellerProfile</h3>
+<pre><code class="language-mermaid">stateDiagram-v2
+  [*] --&gt; pending: submit_application
+  pending --&gt; approved: admin_approve
+  pending --&gt; rejected: admin_reject
+  rejected --&gt; pending: reapply
+  approved --&gt; suspended: admin_suspend
+  suspended --&gt; approved: admin_reactivate
+</code></pre>
+<p>Khi <code>suspended</code>: sản phẩm ẩn khỏi catalog; đơn đang xử lý vẫn fulfill.</p>
+<h3>6.4 State machine — Product</h3>
+<pre><code class="language-mermaid">stateDiagram-v2
+  [*] --&gt; draft: seller_create
+  draft --&gt; active: seller_publish
+  active --&gt; inactive: seller_unpublish
+  inactive --&gt; active: seller_republish
+  active --&gt; suspended: admin_moderate
+  suspended --&gt; active: admin_restore
+</code></pre>
+<p>MVP: có thể bỏ bước <code>pending</code> moderation; admin <code>suspended</code> khi vi phạm.</p>
+<h3>6.5 Luồng đăng ký &amp; xác thực</h3>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant U as User
+  participant FE as React
+  participant API as AuthAPI
+  participant Mail as EmailService
+
+  U-&gt;&gt;FE: Register_form
+  FE-&gt;&gt;API: POST_auth_register
+  API-&gt;&gt;API: Hash_password_validate_email
+  API-&gt;&gt;Mail: Send_verification_optional
+  API--&gt;&gt;FE: JWT_access_refresh
+  FE--&gt;&gt;U: Redirect_home
+
+  Note over U,API: Login flow
+  U-&gt;&gt;FE: Login
+  FE-&gt;&gt;API: POST_auth_login
+  API--&gt;&gt;FE: Tokens
+  FE-&gt;&gt;FE: Merge_guest_cart_if_exists
+</code></pre>
+<p><strong>Quy tắc MVP:</strong></p>
+<ul>
+<li>Email unique; password min 8 ký tự</li>
+<li>Access token TTL 15 phút; refresh 7 ngày</li>
+<li>Guest cart lưu Redis key <code>cart:guest:{sessionId}</code> → merge vào <code>cart:user:{userId}</code> khi login</li>
+</ul>
+<h3>6.6 Luồng seller onboarding → bán hàng</h3>
+<pre><code class="language-mermaid">flowchart TD
+  A[Buyer_login] --&gt; B[Open_shop_form]
+  B --&gt; C[Submit_application]
+  C --&gt; D{Admin_review}
+  D --&gt;|Approve| E[Seller_role_granted]
+  D --&gt;|Reject| F[Show_reason_reapply]
+  E --&gt; G[Create_product_draft]
+  G --&gt; H[Add_variants_inventory_images]
+  H --&gt; I[Publish_active]
+  I --&gt; J[Visible_on_marketplace]
+  F --&gt; B
+</code></pre>
+<h3>6.7 Luồng inventory reservation</h3>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant C as CartService
+  participant R as Redis
+  participant DB as InventoryDB
+  participant Job as Scheduler
+
+  C-&gt;&gt;DB: Check_available_qty
+  C-&gt;&gt;R: SET_reservation_key_TTL_30m
+  C-&gt;&gt;DB: INCREMENT_reserved_qty
+
+  Note over Job: Every_5_min
+  Job-&gt;&gt;R: Scan_expired_keys
+  Job-&gt;&gt;DB: DECREMENT_reserved_qty
+  Job-&gt;&gt;R: DELETE_key
+
+  Note over C: On_checkout
+  C-&gt;&gt;DB: BEGIN_TX_lock_rows
+  C-&gt;&gt;DB: Verify_reserved_or_available
+  C-&gt;&gt;DB: COMMIT_hard_lock
+</code></pre>
+<h3>6.8 Luồng checkout &amp; payment end-to-end</h3>
+<pre><code class="language-mermaid">flowchart TD
+  start[Cart_not_empty] --&gt; addr[Select_shipping_address]
+  addr --&gt; split[Group_items_by_seller]
+  split --&gt; ship[Calc_shipping_per_group]
+  ship --&gt; review[Show_order_summary]
+  review --&gt; payMethod{Payment_method}
+  payMethod --&gt;|Stripe| stripe[Create_PaymentIntent]
+  payMethod --&gt;|VNPay_Momo| redirect[Generate_redirect_URL]
+  payMethod --&gt;|COD| cod[Order_awaiting_cod]
+  stripe --&gt; waitWebhook[Await_webhook]
+  redirect --&gt; waitWebhook
+  waitWebhook --&gt;|Success| confirm[Order_paid_inventory_deducted]
+  waitWebhook --&gt;|Fail| fail[Release_inventory_order_failed]
+  cod --&gt; confirm
+  confirm --&gt; notify[Email_buyer_and_sellers]
+</code></pre>
+<p><strong>Chi tiết tính phí ship (MVP flat rate):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Vùng</th>
+<th>VN seller</th>
+<th>Global seller</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Nội thành HN/HCM</td>
+<td>30,000 VND</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Tỉnh/thành khác VN</td>
+<td>50,000 VND</td>
+<td>—</td>
+</tr>
+<tr>
+<td>US domestic</td>
+<td>—</td>
+<td>$5 flat</td>
+</tr>
+<tr>
+<td>International</td>
+<td>—</td>
+<td>$15 flat</td>
+</tr>
+</tbody></table>
+<p>Mỗi <code>order_group</code> chịu một lần phí ship (không tính theo từng item).</p>
+<h3>6.9 Luồng fulfillment (seller → buyer)</h3>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant Pay as PaymentWebhook
+  participant O as OrderService
+  participant S as SellerPortal
+  participant B as Buyer
+
+  Pay-&gt;&gt;O: payment_success
+  O-&gt;&gt;S: Notify_new_order_group
+  O-&gt;&gt;B: Email_order_confirmed
+  S-&gt;&gt;O: PATCH_status_processing
+  S-&gt;&gt;O: PATCH_status_shipped_with_tracking
+  O-&gt;&gt;B: Email_shipped_with_tracking
+  S-&gt;&gt;O: PATCH_status_delivered
+  O-&gt;&gt;O: Check_all_groups_delivered
+  O-&gt;&gt;B: Email_order_completed
+</code></pre>
+<h3>6.10 Luồng xử lý lỗi &amp; edge cases</h3>
+<table>
+<thead>
+<tr>
+<th>Tình huống</th>
+<th>Hành vi hệ thống</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Buyer thêm SP seller bị suspend</td>
+<td>Ẩn SP; cart item invalid → báo lỗi khi vào giỏ</td>
+</tr>
+<tr>
+<td>Payment webhook đến 2 lần</td>
+<td>Idempotent key <code>payment.external_id</code>; bỏ qua lần 2</td>
+</tr>
+<tr>
+<td>Checkout khi reservation hết hạn</td>
+<td>Re-validate stock; fail nếu không đủ</td>
+</tr>
+<tr>
+<td>1 seller group cancelled, còn lại OK</td>
+<td>Order vẫn <code>confirmed</code>; partial refund P1</td>
+</tr>
+<tr>
+<td>Buyer đổi địa chỉ sau checkout</td>
+<td>Không cho phép (MVP); phải cancel và đặt lại</td>
+</tr>
+<tr>
+<td>Mix VND + USD trong giỏ</td>
+<td>Block ở add-to-cart và checkout</td>
+</tr>
+<tr>
+<td>Seller không ship trong 72h</td>
+<td>Email nhắc; admin alert (P1)</td>
+</tr>
+</tbody></table>
+<h3>6.11 Sơ đồ tương tác tổng thể (happy path)</h3>
+<pre><code class="language-mermaid">flowchart LR
+  subgraph buyerFlow [Buyer]
+    B1[Browse] --&gt; B2[AddToCart]
+    B2 --&gt; B3[Checkout]
+    B3 --&gt; B4[Pay]
+    B4 --&gt; B5[TrackOrder]
+  end
+
+  subgraph platformFlow [Platform]
+    P1[ValidateStock]
+    P2[SplitOrder]
+    P3[ProcessPayment]
+    P4[NotifySellers]
+  end
+
+  subgraph sellerFlow [Seller]
+    S1[ReceiveOrder]
+    S2[Process]
+    S3[Ship]
+  end
+
+  B3 --&gt; P1 --&gt; P2
+  B4 --&gt; P3 --&gt; P4 --&gt; S1
+  S1 --&gt; S2 --&gt; S3 --&gt; B5
+</code></pre>
+<hr>
+<h2>7. Data model cốt lõi (ERD rút gọn)</h2>
+<pre><code class="language-mermaid">erDiagram
+  User ||--o{ Address : has
+  User ||--o| SellerProfile : owns
+  SellerProfile ||--o{ Product : lists
+  Category ||--o{ Product : contains
+  Product ||--o{ ProductVariant : has
+  ProductVariant ||--|| Inventory : tracks
+  User ||--o{ Cart : has
+  Cart ||--o{ CartItem : contains
+  CartItem }o--|| ProductVariant : references
+  User ||--o{ Order : places
+  Order ||--o{ OrderGroup : splits_by_seller
+  OrderGroup }o--|| SellerProfile : fulfilled_by
+  OrderGroup ||--o{ OrderItem : contains
+  Order ||--|| Payment : has
+  OrderGroup ||--o{ Shipment : ships
+</code></pre>
+<h3>Bảng quan trọng</h3>
+<ul>
+<li><strong>users</strong> — email, password_hash, roles[], status</li>
+<li><strong>seller_profiles</strong> — shop_name, slug, status (pending/approved/suspended), commission_rate</li>
+<li><strong>categories</strong> — tree structure (parent_id)</li>
+<li><strong>products</strong> — seller_id, category_id, name, description, status (draft/pending/active)</li>
+<li><strong>product_variants</strong> — sku, price, compare_at_price, attributes (JSON: size, color)</li>
+<li><strong>inventory</strong> — variant_id, quantity, reserved_qty</li>
+<li><strong>carts / cart_items</strong> — Redis hoặc DB; key theo user_id</li>
+<li><strong>orders</strong> — buyer_id, total, currency, payment_status, shipping_address (snapshot JSON)</li>
+<li><strong>order_groups</strong> — order_id, seller_id, subtotal, shipping_fee, status (mỗi seller = 1 group)</li>
+<li><strong>order_items</strong> — snapshot giá/tên SP tại thời điểm mua</li>
+<li><strong>payments</strong> — provider (stripe/vnpay/momo), external_id, amount, status</li>
+<li><strong>shipments</strong> — carrier, tracking_number, status</li>
+</ul>
+<p><strong>Quy tắc tách đơn:</strong> 1 checkout → 1 <code>order</code> cha → N <code>order_group</code> (theo seller). Buyer thấy 1 đơn tổng; seller chỉ thấy group của mình.</p>
+<hr>
+<h2>8. API Contract chi tiết (theo Use Case)</h2>
+<h3>8.0 Quy ước chung</h3>
+<p><strong>Base URL:</strong> <code>https://api.example.com/api/v1</code></p>
+<p><strong>Authentication:</strong></p>
+<ul>
+<li>Public endpoints: không cần token</li>
+<li>Protected: <code>Authorization: Bearer {accessToken}</code></li>
+<li>Guest cart: header <code>X-Guest-Session-Id: {uuid}</code> (tạo ở client, lưu localStorage)</li>
+</ul>
+<p><strong>Content-Type:</strong> <code>application/json</code> (trừ upload: <code>multipart/form-data</code>)</p>
+<p><strong>Pagination (query chung):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Default</th>
+<th>Mô tả</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>page</code></td>
+<td>int</td>
+<td>0</td>
+<td>Zero-based</td>
+</tr>
+<tr>
+<td><code>size</code></td>
+<td>int</td>
+<td>20</td>
+<td>Max 100</td>
+</tr>
+<tr>
+<td><code>sort</code></td>
+<td>string</td>
+<td><code>createdAt,desc</code></td>
+<td><code>field,direction</code></td>
+</tr>
+</tbody></table>
+<p><strong>Response envelope (list):</strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [],
+  &quot;meta&quot;: { &quot;page&quot;: 0, &quot;size&quot;: 20, &quot;totalElements&quot;: 150, &quot;totalPages&quot;: 8 }
+}
+</code></pre>
+<p><strong>Error envelope:</strong></p>
+<pre><code class="language-json">{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;CART_CURRENCY_MISMATCH&quot;,
+    &quot;message&quot;: &quot;Giỏ hàng chỉ hỗ trợ một loại tiền tệ&quot;,
+    &quot;details&quot;: [{ &quot;field&quot;: &quot;variantId&quot;, &quot;reason&quot;: &quot;...&quot; }],
+    &quot;traceId&quot;: &quot;abc-123&quot;
+  }
+}
+</code></pre>
+<p><strong>HTTP status chuẩn:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Khi nào</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>200</td>
+<td>GET/PATCH thành công</td>
+</tr>
+<tr>
+<td>201</td>
+<td>POST tạo mới</td>
+</tr>
+<tr>
+<td>204</td>
+<td>DELETE thành công</td>
+</tr>
+<tr>
+<td>400</td>
+<td>Validation / business rule</td>
+</tr>
+<tr>
+<td>401</td>
+<td>Chưa auth / token hết hạn</td>
+</tr>
+<tr>
+<td>403</td>
+<td>Không đủ quyền / không sở hữu resource</td>
+</tr>
+<tr>
+<td>404</td>
+<td>Không tìm thấy</td>
+</tr>
+<tr>
+<td>409</td>
+<td>Conflict (stock, duplicate email)</td>
+</tr>
+<tr>
+<td>422</td>
+<td>Semantic error (checkout fail)</td>
+</tr>
+<tr>
+<td>429</td>
+<td>Rate limit</td>
+</tr>
+</tbody></table>
+<p><strong>Bảng ánh xạ Use Case → Endpoint (tổng quan):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Use Case</th>
+<th>Method</th>
+<th>Endpoint</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UC-GST-001</td>
+<td>GET</td>
+<td><code>/categories</code>, <code>/categories/{slug}/products</code></td>
+</tr>
+<tr>
+<td>UC-GST-002</td>
+<td>GET</td>
+<td><code>/products?q=</code></td>
+</tr>
+<tr>
+<td>UC-GST-003</td>
+<td>GET</td>
+<td><code>/products/{slug}</code>, <code>/shops/{slug}</code></td>
+</tr>
+<tr>
+<td>UC-BUY-001</td>
+<td>POST</td>
+<td><code>/auth/register</code></td>
+</tr>
+<tr>
+<td>UC-BUY-002</td>
+<td>POST</td>
+<td><code>/auth/login</code>, <code>/auth/logout</code>, <code>/auth/refresh</code></td>
+</tr>
+<tr>
+<td>UC-BUY-003</td>
+<td>POST</td>
+<td><code>/auth/forgot-password</code>, <code>/auth/reset-password</code></td>
+</tr>
+<tr>
+<td>UC-BUY-004</td>
+<td>GET/PUT</td>
+<td><code>/users/me</code>, <code>/users/me/addresses</code></td>
+</tr>
+<tr>
+<td>UC-BUY-005</td>
+<td>POST</td>
+<td><code>/cart/items</code></td>
+</tr>
+<tr>
+<td>UC-BUY-006</td>
+<td>PUT/DELETE</td>
+<td><code>/cart/items/{itemId}</code></td>
+</tr>
+<tr>
+<td>UC-BUY-007</td>
+<td>POST</td>
+<td><code>/cart/merge</code></td>
+</tr>
+<tr>
+<td>UC-BUY-008</td>
+<td>POST</td>
+<td><code>/checkout/preview</code>, <code>/checkout</code></td>
+</tr>
+<tr>
+<td>UC-BUY-009</td>
+<td>GET</td>
+<td><code>/orders/{id}/payment</code></td>
+</tr>
+<tr>
+<td>UC-BUY-010</td>
+<td>—</td>
+<td><code>paymentMethod: &quot;COD&quot;</code> trong <code>/checkout</code></td>
+</tr>
+<tr>
+<td>UC-BUY-011</td>
+<td>GET</td>
+<td><code>/orders</code>, <code>/orders/{id}</code></td>
+</tr>
+<tr>
+<td>UC-BUY-012</td>
+<td>GET</td>
+<td><code>/orders/{id}/shipments</code></td>
+</tr>
+<tr>
+<td>UC-BUY-013</td>
+<td>POST</td>
+<td><code>/orders/{id}/cancel</code></td>
+</tr>
+<tr>
+<td>UC-BUY-014</td>
+<td>POST</td>
+<td><code>/seller/applications</code></td>
+</tr>
+<tr>
+<td>UC-SEL-001</td>
+<td>POST</td>
+<td><code>/seller/applications</code></td>
+</tr>
+<tr>
+<td>UC-SEL-002</td>
+<td>GET/PUT</td>
+<td><code>/seller/profile</code></td>
+</tr>
+<tr>
+<td>UC-SEL-003/004</td>
+<td>POST/PATCH</td>
+<td><code>/seller/products</code></td>
+</tr>
+<tr>
+<td>UC-SEL-005</td>
+<td>PUT</td>
+<td><code>/seller/products/{id}/variants/{variantId}</code></td>
+</tr>
+<tr>
+<td>UC-SEL-006</td>
+<td>POST/DELETE</td>
+<td><code>/seller/products/{id}/images</code></td>
+</tr>
+<tr>
+<td>UC-SEL-007</td>
+<td>—</td>
+<td>Email + <code>GET /seller/orders?status=new</code></td>
+</tr>
+<tr>
+<td>UC-SEL-008/009</td>
+<td>PATCH</td>
+<td><code>/seller/order-groups/{groupId}</code></td>
+</tr>
+<tr>
+<td>UC-SEL-010</td>
+<td>PATCH</td>
+<td><code>/seller/order-groups/{groupId}</code> (<code>status: delivered</code>)</td>
+</tr>
+<tr>
+<td>UC-ADM-001/002</td>
+<td>GET/PATCH</td>
+<td><code>/admin/sellers</code>, <code>/admin/sellers/{id}</code></td>
+</tr>
+<tr>
+<td>UC-ADM-003</td>
+<td>CRUD</td>
+<td><code>/admin/categories</code></td>
+</tr>
+<tr>
+<td>UC-ADM-004</td>
+<td>PATCH</td>
+<td><code>/admin/products/{id}</code></td>
+</tr>
+<tr>
+<td>UC-ADM-005</td>
+<td>GET</td>
+<td><code>/admin/orders</code></td>
+</tr>
+<tr>
+<td>UC-ADM-006</td>
+<td>PATCH</td>
+<td><code>/admin/orders/{id}</code>, <code>/admin/order-groups/{groupId}</code></td>
+</tr>
+<tr>
+<td>UC-ADM-007</td>
+<td>GET</td>
+<td><code>/admin/audit-logs</code></td>
+</tr>
+<tr>
+<td>UC-SYS-*</td>
+<td>POST</td>
+<td><code>/webhooks/</code>* (internal cron không expose)</td>
+</tr>
+</tbody></table>
+<hr>
+<h3>8.1 Auth — <code>UC-BUY-001</code>, <code>UC-BUY-002</code>, <code>UC-BUY-003</code></h3>
+<blockquote>
+<p>Thiết kế đầy đủ: xem <strong><a href="#19-module-auth--thi%E1%BA%BFt-k%E1%BA%BF-chi-t%E1%BA%BFt">Mục 19 — Module Auth</a></strong> (schema DB, JWT, RBAC, Spring Security, flows, frontend).</p>
+</blockquote>
+<h4><code>POST /auth/register</code> — UC-BUY-001</h4>
+<p><strong>Auth:</strong> Public</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;email&quot;: &quot;buyer@example.com&quot;,
+  &quot;password&quot;: &quot;securePass1&quot;,
+  &quot;fullName&quot;: &quot;Nguyen Van A&quot;,
+  &quot;phone&quot;: &quot;+84901234567&quot;
+}
+</code></pre>
+<p><strong>Validation:</strong> email unique, password min 8 chars, phone E.164 optional</p>
+<p><strong>Response 201:</strong></p>
+<pre><code class="language-json">{
+  &quot;user&quot;: { &quot;id&quot;: &quot;uuid&quot;, &quot;email&quot;: &quot;...&quot;, &quot;fullName&quot;: &quot;...&quot;, &quot;roles&quot;: [&quot;BUYER&quot;] },
+  &quot;accessToken&quot;: &quot;eyJ...&quot;,
+  &quot;refreshToken&quot;: &quot;eyJ...&quot;,
+  &quot;expiresIn&quot;: 900
+}
+</code></pre>
+<p><strong>Errors:</strong> <code>409 EMAIL_ALREADY_EXISTS</code>, <code>400 VALIDATION_ERROR</code></p>
+<hr>
+<h4><code>POST /auth/login</code> — UC-BUY-002</h4>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{ &quot;email&quot;: &quot;buyer@example.com&quot;, &quot;password&quot;: &quot;securePass1&quot; }
+</code></pre>
+<p><strong>Response 200:</strong> Cùng structure như register.</p>
+<p><strong>Side effect:</strong> Nếu có <code>X-Guest-Session-Id</code>, client nên gọi <code>POST /cart/merge</code> ngay sau login (UC-BUY-007).</p>
+<p><strong>Errors:</strong> <code>401 INVALID_CREDENTIALS</code>, <code>403 ACCOUNT_SUSPENDED</code></p>
+<hr>
+<h4><code>POST /auth/refresh</code> — UC-BUY-002</h4>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{ &quot;refreshToken&quot;: &quot;eyJ...&quot; }
+</code></pre>
+<p><strong>Response 200:</strong> <code>{ &quot;accessToken&quot;, &quot;refreshToken&quot;, &quot;expiresIn&quot; }</code></p>
+<hr>
+<h4><code>POST /auth/logout</code> — UC-BUY-002</h4>
+<p><strong>Auth:</strong> Bearer | <strong>Response:</strong> <code>204</code></p>
+<p><strong>Side effect:</strong> Invalidate refresh token server-side (Redis blacklist).</p>
+<hr>
+<h4><code>POST /auth/forgot-password</code> — UC-BUY-003</h4>
+<p><strong>Request:</strong> <code>{ &quot;email&quot;: &quot;buyer@example.com&quot; }</code></p>
+<p><strong>Response 200:</strong> <code>{ &quot;message&quot;: &quot;If email exists, reset link sent&quot; }</code> (luôn 200, tránh email enumeration)</p>
+<hr>
+<h4><code>POST /auth/reset-password</code> — UC-BUY-003</h4>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{ &quot;token&quot;: &quot;reset-token-from-email&quot;, &quot;newPassword&quot;: &quot;newSecurePass1&quot; }
+</code></pre>
+<p><strong>Response 200:</strong> <code>{ &quot;message&quot;: &quot;Password updated&quot; }</code> | <strong>Errors:</strong> <code>400 TOKEN_EXPIRED</code></p>
+<hr>
+<h3>8.2 Catalog (Public) — <code>UC-GST-001</code>, <code>UC-GST-002</code>, <code>UC-GST-003</code></h3>
+<h4><code>GET /categories</code> — UC-GST-001</h4>
+<p><strong>Auth:</strong> Public</p>
+<p><strong>Query:</strong> <code>parentId</code> (optional, null = root), <code>depth</code> (default 2)</p>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [
+    {
+      &quot;id&quot;: &quot;uuid&quot;,
+      &quot;name&quot;: &quot;Điện tử&quot;,
+      &quot;slug&quot;: &quot;dien-tu&quot;,
+      &quot;imageUrl&quot;: &quot;https://...&quot;,
+      &quot;children&quot;: [
+        { &quot;id&quot;: &quot;uuid&quot;, &quot;name&quot;: &quot;Điện thoại&quot;, &quot;slug&quot;: &quot;dien-thoai&quot;, &quot;children&quot;: [] }
+      ]
+    }
+  ]
+}
+</code></pre>
+<hr>
+<h4><code>GET /products</code> — UC-GST-001, UC-GST-002</h4>
+<p><strong>Auth:</strong> Public</p>
+<p><strong>Query:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Mô tả</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>q</code></td>
+<td>string</td>
+<td>Full-text search (UC-GST-002)</td>
+</tr>
+<tr>
+<td><code>categorySlug</code></td>
+<td>string</td>
+<td>Filter theo category</td>
+</tr>
+<tr>
+<td><code>sellerSlug</code></td>
+<td>string</td>
+<td>Filter theo shop</td>
+</tr>
+<tr>
+<td><code>minPrice</code> / <code>maxPrice</code></td>
+<td>decimal</td>
+<td>Filter giá</td>
+</tr>
+<tr>
+<td><code>currency</code></td>
+<td>string</td>
+<td><code>VND</code></td>
+</tr>
+<tr>
+<td><code>sort</code></td>
+<td>string</td>
+<td><code>price,asc</code></td>
+</tr>
+<tr>
+<td><code>page</code>, <code>size</code></td>
+<td>int</td>
+<td>Pagination</td>
+</tr>
+</tbody></table>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [
+    {
+      &quot;id&quot;: &quot;uuid&quot;,
+      &quot;name&quot;: &quot;iPhone 15 Case&quot;,
+      &quot;slug&quot;: &quot;iphone-15-case&quot;,
+      &quot;thumbnailUrl&quot;: &quot;https://...&quot;,
+      &quot;priceFrom&quot;: 150000,
+      &quot;currency&quot;: &quot;VND&quot;,
+      &quot;seller&quot;: { &quot;shopName&quot;: &quot;TechShop&quot;, &quot;slug&quot;: &quot;techshop&quot; },
+      &quot;inStock&quot;: true
+    }
+  ],
+  &quot;meta&quot;: { &quot;page&quot;: 0, &quot;size&quot;: 20, &quot;totalElements&quot;: 45, &quot;totalPages&quot;: 3 }
+}
+</code></pre>
+<hr>
+<h4><code>GET /products/{slug}</code> — UC-GST-003</h4>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;uuid&quot;,
+  &quot;name&quot;: &quot;iPhone 15 Case&quot;,
+  &quot;slug&quot;: &quot;iphone-15-case&quot;,
+  &quot;description&quot;: &quot;Silicone case...&quot;,
+  &quot;currency&quot;: &quot;VND&quot;,
+  &quot;status&quot;: &quot;active&quot;,
+  &quot;category&quot;: { &quot;id&quot;: &quot;uuid&quot;, &quot;name&quot;: &quot;Phụ kiện&quot;, &quot;slug&quot;: &quot;phu-kien&quot; },
+  &quot;seller&quot;: { &quot;id&quot;: &quot;uuid&quot;, &quot;shopName&quot;: &quot;TechShop&quot;, &quot;slug&quot;: &quot;techshop&quot; },
+  &quot;images&quot;: [{ &quot;id&quot;: &quot;uuid&quot;, &quot;url&quot;: &quot;https://...&quot;, &quot;sortOrder&quot;: 0 }],
+  &quot;variants&quot;: [
+    {
+      &quot;id&quot;: &quot;uuid&quot;,
+      &quot;sku&quot;: &quot;CASE-15-BLK&quot;,
+      &quot;attributes&quot;: { &quot;color&quot;: &quot;Black&quot;, &quot;size&quot;: &quot;Standard&quot; },
+      &quot;price&quot;: 150000,
+      &quot;compareAtPrice&quot;: 200000,
+      &quot;availableQty&quot;: 42
+    }
+  ]
+}
+</code></pre>
+<p><strong>Errors:</strong> <code>404 PRODUCT_NOT_FOUND</code></p>
+<hr>
+<h4><code>GET /shops/{slug}</code> — UC-GST-003</h4>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;uuid&quot;,
+  &quot;shopName&quot;: &quot;TechShop&quot;,
+  &quot;slug&quot;: &quot;techshop&quot;,
+  &quot;description&quot;: &quot;...&quot;,
+  &quot;logoUrl&quot;: &quot;https://...&quot;,
+  &quot;productCount&quot;: 128,
+  &quot;joinedAt&quot;: &quot;2025-01-15T00:00:00Z&quot;
+}
+</code></pre>
+<p>Kết hợp <code>GET /products?sellerSlug=techshop</code> để lấy SP của shop.</p>
+<hr>
+<h3>8.3 User Profile &amp; Addresses — <code>UC-BUY-004</code></h3>
+<h4><code>GET /users/me</code></h4>
+<p><strong>Auth:</strong> Bearer (BUYER+)</p>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;uuid&quot;,
+  &quot;email&quot;: &quot;buyer@example.com&quot;,
+  &quot;fullName&quot;: &quot;Nguyen Van A&quot;,
+  &quot;phone&quot;: &quot;+84901234567&quot;,
+  &quot;roles&quot;: [&quot;BUYER&quot;, &quot;SELLER&quot;],
+  &quot;sellerProfile&quot;: { &quot;id&quot;: &quot;uuid&quot;, &quot;shopName&quot;: &quot;MyShop&quot;, &quot;status&quot;: &quot;approved&quot; }
+}
+</code></pre>
+<hr>
+<h4><code>PUT /users/me</code></h4>
+<p><strong>Request:</strong> <code>{ &quot;fullName&quot;: &quot;...&quot;, &quot;phone&quot;: &quot;+84...&quot; }</code> | <strong>Response 200:</strong> User object</p>
+<hr>
+<h4><code>GET /users/me/addresses</code></h4>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [
+    {
+      &quot;id&quot;: &quot;uuid&quot;,
+      &quot;label&quot;: &quot;Nhà&quot;,
+      &quot;recipientName&quot;: &quot;Nguyen Van A&quot;,
+      &quot;phone&quot;: &quot;+84901234567&quot;,
+      &quot;line1&quot;: &quot;123 Nguyen Trai&quot;,
+      &quot;line2&quot;: &quot;Phuong 1&quot;,
+      &quot;city&quot;: &quot;Ho Chi Minh&quot;,
+      &quot;state&quot;: &quot;HCM&quot;,
+      &quot;postalCode&quot;: &quot;700000&quot;,
+      &quot;country&quot;: &quot;VN&quot;,
+      &quot;isDefault&quot;: true
+    }
+  ]
+}
+</code></pre>
+<hr>
+<h4><code>POST /users/me/addresses</code></h4>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;label&quot;: &quot;Nhà&quot;,
+  &quot;recipientName&quot;: &quot;Nguyen Van A&quot;,
+  &quot;phone&quot;: &quot;+84901234567&quot;,
+  &quot;line1&quot;: &quot;123 Nguyen Trai&quot;,
+  &quot;line2&quot;: &quot;&quot;,
+  &quot;city&quot;: &quot;Ho Chi Minh&quot;,
+  &quot;state&quot;: &quot;HCM&quot;,
+  &quot;postalCode&quot;: &quot;700000&quot;,
+  &quot;country&quot;: &quot;VN&quot;,
+  &quot;isDefault&quot;: true
+}
+</code></pre>
+<p><strong>Response 201:</strong> Address object | <strong>Validation:</strong> <code>country</code> ISO 3166-1 alpha-2</p>
+<hr>
+<h4><code>PUT /users/me/addresses/{addressId}</code> — cập nhật</h4>
+<h4><code>DELETE /users/me/addresses/{addressId}</code> — <strong>Response 204</strong></h4>
+<h4><code>PATCH /users/me/addresses/{addressId}/default</code> — đặt mặc định | <strong>Response 200</strong></h4>
+<hr>
+<h3>8.4 Cart — <code>UC-BUY-005</code>, <code>UC-BUY-006</code>, <code>UC-BUY-007</code></h3>
+<h4><code>GET /cart</code></h4>
+<p><strong>Auth:</strong> Bearer hoặc <code>X-Guest-Session-Id</code></p>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;cart-uuid&quot;,
+  &quot;currency&quot;: &quot;VND&quot;,
+  &quot;itemCount&quot;: 3,
+  &quot;subtotal&quot;: 450000,
+  &quot;groups&quot;: [
+    {
+      &quot;seller&quot;: { &quot;id&quot;: &quot;uuid&quot;, &quot;shopName&quot;: &quot;TechShop&quot;, &quot;slug&quot;: &quot;techshop&quot; },
+      &quot;items&quot;: [
+        {
+          &quot;id&quot;: &quot;item-uuid&quot;,
+          &quot;variantId&quot;: &quot;uuid&quot;,
+          &quot;productName&quot;: &quot;iPhone 15 Case&quot;,
+          &quot;variantAttributes&quot;: { &quot;color&quot;: &quot;Black&quot; },
+          &quot;quantity&quot;: 2,
+          &quot;unitPrice&quot;: 150000,
+          &quot;lineTotal&quot;: 300000,
+          &quot;availableQty&quot;: 42
+        }
+      ],
+      &quot;subtotal&quot;: 300000
+    }
+  ],
+  &quot;warnings&quot;: []
+}
+</code></pre>
+<hr>
+<h4><code>POST /cart/items</code> — UC-BUY-005</h4>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{ &quot;variantId&quot;: &quot;uuid&quot;, &quot;quantity&quot;: 2 }
+</code></pre>
+<p><strong>Response 201:</strong> Full cart object (như GET /cart)</p>
+<p><strong>Business rules:</strong></p>
+<ul>
+<li><code>quantity</code> &gt;= 1, max 99</li>
+<li>Reject nếu currency khác giỏ hiện tại → <code>400 CART_CURRENCY_MISMATCH</code></li>
+<li>Reject nếu hết hàng → <code>409 INSUFFICIENT_STOCK</code></li>
+</ul>
+<hr>
+<h4><code>PUT /cart/items/{itemId}</code> — UC-BUY-006</h4>
+<p><strong>Request:</strong> <code>{ &quot;quantity&quot;: 3 }</code> | <strong>Response 200:</strong> Cart object</p>
+<p><strong>Errors:</strong> <code>quantity=0</code> → xóa item (hoặc dùng DELETE)</p>
+<hr>
+<h4><code>DELETE /cart/items/{itemId}</code> — UC-BUY-006 | <strong>Response 200:</strong> Cart object</h4>
+<hr>
+<h4><code>DELETE /cart</code> — xóa toàn bộ giỏ | <strong>Response 204</strong></h4>
+<hr>
+<h4><code>POST /cart/merge</code> — UC-BUY-007</h4>
+<p><strong>Auth:</strong> Bearer (bắt buộc)</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{ &quot;guestSessionId&quot;: &quot;guest-uuid-from-localStorage&quot; }
+</code></pre>
+<p><strong>Response 200:</strong> Cart đã merge (ưu tiên quantity lớn hơn; conflict currency → giữ cart user, discard guest)</p>
+<hr>
+<h3>8.5 Checkout &amp; Orders — <code>UC-BUY-008</code>, <code>UC-BUY-009</code>, <code>UC-BUY-010</code>, <code>UC-BUY-011</code>, <code>UC-BUY-012</code>, <code>UC-BUY-013</code></h3>
+<h4><code>POST /checkout/preview</code> — UC-BUY-008 (bước tính phí trước)</h4>
+<p><strong>Auth:</strong> Bearer</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{ &quot;addressId&quot;: &quot;uuid&quot; }
+</code></pre>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;currency&quot;: &quot;VND&quot;,
+  &quot;groups&quot;: [
+    {
+      &quot;seller&quot;: { &quot;id&quot;: &quot;uuid&quot;, &quot;shopName&quot;: &quot;TechShop&quot; },
+      &quot;items&quot;: [{ &quot;productName&quot;: &quot;...&quot;, &quot;quantity&quot;: 2, &quot;lineTotal&quot;: 300000 }],
+      &quot;subtotal&quot;: 300000,
+      &quot;shippingFee&quot;: 30000,
+      &quot;shippingMethod&quot;: &quot;STANDARD_VN&quot;
+    },
+    {
+      &quot;seller&quot;: { &quot;id&quot;: &quot;uuid&quot;, &quot;shopName&quot;: &quot;FashionVN&quot; },
+      &quot;subtotal&quot;: 150000,
+      &quot;shippingFee&quot;: 30000
+    }
+  ],
+  &quot;subtotal&quot;: 450000,
+  &quot;totalShipping&quot;: 60000,
+  &quot;grandTotal&quot;: 510000,
+  &quot;availablePaymentMethods&quot;: [&quot;VNPAY&quot;, &quot;MOMO&quot;, &quot;COD&quot;]
+}
+</code></pre>
+<p><code>availablePaymentMethods</code> phụ thuộc <code>country</code> + <code>currency</code> (COD chỉ VN).</p>
+<hr>
+<h4><code>POST /checkout</code> — UC-BUY-008, UC-BUY-009, UC-BUY-010</h4>
+<p><strong>Auth:</strong> Bearer</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;addressId&quot;: &quot;uuid&quot;,
+  &quot;paymentMethod&quot;: &quot;VNPAY&quot;,
+  &quot;note&quot;: &quot;Giao giờ hành chính&quot;
+}
+</code></pre>
+<p><code>paymentMethod</code>: <code>STRIPE</code> | <code>VNPAY</code> | <code>MOMO</code> | <code>COD</code></p>
+<p><strong>Response 201:</strong></p>
+<pre><code class="language-json">{
+  &quot;order&quot;: {
+    &quot;id&quot;: &quot;uuid&quot;,
+    &quot;orderNumber&quot;: &quot;ORD-20250629-0001&quot;,
+    &quot;status&quot;: &quot;pending_payment&quot;,
+    &quot;paymentStatus&quot;: &quot;pending&quot;,
+    &quot;currency&quot;: &quot;VND&quot;,
+    &quot;grandTotal&quot;: 510000,
+    &quot;createdAt&quot;: &quot;2025-06-29T10:00:00Z&quot;,
+    &quot;groups&quot;: [
+      {
+        &quot;id&quot;: &quot;group-uuid&quot;,
+        &quot;seller&quot;: { &quot;shopName&quot;: &quot;TechShop&quot; },
+        &quot;status&quot;: &quot;new&quot;,
+        &quot;subtotal&quot;: 300000,
+        &quot;shippingFee&quot;: 30000,
+        &quot;items&quot;: [{ &quot;productName&quot;: &quot;...&quot;, &quot;quantity&quot;: 2, &quot;unitPrice&quot;: 150000 }]
+      }
+    ]
+  },
+  &quot;payment&quot;: {
+    &quot;id&quot;: &quot;uuid&quot;,
+    &quot;method&quot;: &quot;VNPAY&quot;,
+    &quot;status&quot;: &quot;pending&quot;,
+    &quot;redirectUrl&quot;: &quot;https://sandbox.vnpayment.vn/...&quot;,
+    &quot;expiresAt&quot;: &quot;2025-06-29T10:15:00Z&quot;
+  }
+}
+</code></pre>
+<p><strong>Stripe response khác:</strong> thay <code>redirectUrl</code> bằng:</p>
+<pre><code class="language-json">&quot;clientSecret&quot;: &quot;pi_xxx_secret_xxx&quot;,
+&quot;publishableKey&quot;: &quot;pk_test_...&quot;
+</code></pre>
+<p><strong>COD response:</strong> <code>order.status = &quot;confirmed&quot;</code>, <code>payment.status = &quot;awaiting_cod&quot;</code>, không có redirectUrl.</p>
+<p><strong>Errors:</strong></p>
+<ul>
+<li><code>422 CHECKOUT_STOCK_UNAVAILABLE</code> + <code>details: [{ variantId, requested, available }]</code></li>
+<li><code>400 COD_NOT_AVAILABLE</code> (địa chỉ ngoài VN hoặc vượt limit)</li>
+<li><code>400 CART_EMPTY</code></li>
+</ul>
+<hr>
+<h4><code>GET /orders</code> — UC-BUY-011</h4>
+<p><strong>Auth:</strong> Bearer | <strong>Query:</strong> <code>status</code>, <code>page</code>, <code>size</code>, <code>from</code>, <code>to</code></p>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [
+    {
+      &quot;id&quot;: &quot;uuid&quot;,
+      &quot;orderNumber&quot;: &quot;ORD-20250629-0001&quot;,
+      &quot;status&quot;: &quot;confirmed&quot;,
+      &quot;paymentStatus&quot;: &quot;paid&quot;,
+      &quot;grandTotal&quot;: 510000,
+      &quot;currency&quot;: &quot;VND&quot;,
+      &quot;itemCount&quot;: 3,
+      &quot;createdAt&quot;: &quot;2025-06-29T10:00:00Z&quot;
+    }
+  ],
+  &quot;meta&quot;: { &quot;page&quot;: 0, &quot;size&quot;: 20, &quot;totalElements&quot;: 5, &quot;totalPages&quot;: 1 }
+}
+</code></pre>
+<hr>
+<h4><code>GET /orders/{orderId}</code> — UC-BUY-011, UC-BUY-012</h4>
+<p><strong>Response 200:</strong> Order đầy đủ + groups + items + payment + shipments:</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;uuid&quot;,
+  &quot;orderNumber&quot;: &quot;ORD-20250629-0001&quot;,
+  &quot;status&quot;: &quot;confirmed&quot;,
+  &quot;paymentStatus&quot;: &quot;paid&quot;,
+  &quot;shippingAddress&quot;: { &quot;recipientName&quot;: &quot;...&quot;, &quot;line1&quot;: &quot;...&quot;, &quot;city&quot;: &quot;...&quot;, &quot;country&quot;: &quot;VN&quot; },
+  &quot;groups&quot;: [
+    {
+      &quot;id&quot;: &quot;group-uuid&quot;,
+      &quot;seller&quot;: { &quot;shopName&quot;: &quot;TechShop&quot; },
+      &quot;status&quot;: &quot;shipped&quot;,
+      &quot;subtotal&quot;: 300000,
+      &quot;shippingFee&quot;: 30000,
+      &quot;items&quot;: [...],
+      &quot;shipment&quot;: {
+        &quot;carrier&quot;: &quot;GHN&quot;,
+        &quot;trackingNumber&quot;: &quot;GHN123456&quot;,
+        &quot;status&quot;: &quot;in_transit&quot;,
+        &quot;shippedAt&quot;: &quot;2025-06-30T08:00:00Z&quot;
+      }
+    }
+  ],
+  &quot;payment&quot;: { &quot;method&quot;: &quot;VNPAY&quot;, &quot;status&quot;: &quot;paid&quot;, &quot;paidAt&quot;: &quot;2025-06-29T10:05:00Z&quot; },
+  &quot;grandTotal&quot;: 510000,
+  &quot;currency&quot;: &quot;VND&quot;
+}
+</code></pre>
+<hr>
+<h4><code>GET /orders/{orderId}/payment</code> — UC-BUY-009 (retry payment)</h4>
+<p><strong>Auth:</strong> Bearer (owner) | Chỉ khi <code>payment.status = pending</code> và chưa timeout</p>
+<p><strong>Response 200:</strong> Payment object với <code>redirectUrl</code> hoặc <code>clientSecret</code> mới</p>
+<hr>
+<h4><code>POST /orders/{orderId}/cancel</code> — UC-BUY-013 (P1)</h4>
+<p><strong>Auth:</strong> Bearer | <strong>Request:</strong> <code>{ &quot;reason&quot;: &quot;Đổi ý&quot; }</code></p>
+<p><strong>Điều kiện:</strong> Tất cả groups ở <code>new</code>; chưa <code>processing</code></p>
+<p><strong>Response 200:</strong> <code>{ &quot;orderId&quot;, &quot;status&quot;: &quot;cancelled&quot; }</code> | <strong>Errors:</strong> <code>409 ORDER_NOT_CANCELLABLE</code></p>
+<hr>
+<h3>8.6 Seller — <code>UC-BUY-014</code>, <code>UC-SEL-001</code> → <code>UC-SEL-010</code></h3>
+<h4><code>POST /seller/applications</code> — UC-SEL-001, UC-BUY-014</h4>
+<p><strong>Auth:</strong> Bearer</p>
+<p><strong>Request (multipart hoặc JSON + separate upload):</strong></p>
+<pre><code class="language-json">{
+  &quot;shopName&quot;: &quot;TechShop VN&quot;,
+  &quot;description&quot;: &quot;Chuyên phụ kiện điện thoại&quot;,
+  &quot;businessType&quot;: &quot;individual&quot;,
+  &quot;phone&quot;: &quot;+84901234567&quot;,
+  &quot;warehouseAddress&quot;: {
+    &quot;line1&quot;: &quot;456 Le Loi&quot;,
+    &quot;city&quot;: &quot;Ho Chi Minh&quot;,
+    &quot;country&quot;: &quot;VN&quot;
+  },
+  &quot;documentUrls&quot;: [&quot;https://s3.../cmnd-front.jpg&quot;]
+}
+</code></pre>
+<p><strong>Response 201:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;uuid&quot;,
+  &quot;shopName&quot;: &quot;TechShop VN&quot;,
+  &quot;slug&quot;: &quot;techshop-vn&quot;,
+  &quot;status&quot;: &quot;pending&quot;,
+  &quot;submittedAt&quot;: &quot;2025-06-29T10:00:00Z&quot;
+}
+</code></pre>
+<p><strong>Errors:</strong> <code>409 SELLER_APPLICATION_EXISTS</code></p>
+<hr>
+<h4><code>GET /seller/profile</code> — UC-SEL-002</h4>
+<p><strong>Auth:</strong> SELLER | <strong>Response 200:</strong> SellerProfile đầy đủ + stats <code>{ totalProducts, pendingOrders, revenue30d }</code></p>
+<hr>
+<h4><code>PUT /seller/profile</code> — UC-SEL-002</h4>
+<p><strong>Request:</strong> <code>{ &quot;description&quot;, &quot;phone&quot;, &quot;logoUrl&quot; }</code> — không đổi <code>shopName</code> sau approved (MVP)</p>
+<hr>
+<h4><code>GET /seller/products</code> — UC-SEL-003</h4>
+<p><strong>Query:</strong> <code>status</code> (draft/active/inactive), <code>q</code>, <code>page</code>, <code>size</code></p>
+<hr>
+<h4><code>POST /seller/products</code> — UC-SEL-003</h4>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;iPhone 15 Case&quot;,
+  &quot;description&quot;: &quot;...&quot;,
+  &quot;categoryId&quot;: &quot;uuid&quot;,
+  &quot;currency&quot;: &quot;VND&quot;,
+  &quot;variants&quot;: [
+    {
+      &quot;sku&quot;: &quot;CASE-15-BLK&quot;,
+      &quot;attributes&quot;: { &quot;color&quot;: &quot;Black&quot; },
+      &quot;price&quot;: 150000,
+      &quot;compareAtPrice&quot;: 200000,
+      &quot;quantity&quot;: 100
+    }
+  ]
+}
+</code></pre>
+<p><strong>Response 201:</strong> Product với <code>status: &quot;draft&quot;</code></p>
+<hr>
+<h4><code>GET /seller/products/{productId}</code></h4>
+<h4><code>PUT /seller/products/{productId}</code> — cập nhật name, description, category</h4>
+<h4><code>PATCH /seller/products/{productId}/status</code> — UC-SEL-004</h4>
+<p><strong>Request:</strong> <code>{ &quot;status&quot;: &quot;active&quot; }</code> | <code>draft</code> → <code>active</code> (publish)</p>
+<p><strong>Errors:</strong> <code>403 SELLER_NOT_APPROVED</code>, <code>400 PRODUCT_INCOMPLETE</code> (thiếu ảnh/variant)</p>
+<hr>
+<h4><code>PUT /seller/products/{productId}/variants/{variantId}</code> — UC-SEL-005</h4>
+<p><strong>Request:</strong> <code>{ &quot;price&quot;: 140000, &quot;quantity&quot;: 80, &quot;attributes&quot;: { &quot;color&quot;: &quot;Black&quot; } }</code></p>
+<hr>
+<h4><code>POST /seller/products/{productId}/images</code> — UC-SEL-006</h4>
+<p><strong>Content-Type:</strong> <code>multipart/form-data</code> | Field: <code>file</code> (max 5MB, jpg/png/webp)</p>
+<p><strong>Response 201:</strong> <code>{ &quot;id&quot;, &quot;url&quot;, &quot;sortOrder&quot; }</code></p>
+<hr>
+<h4><code>DELETE /seller/products/{productId}/images/{imageId}</code> — UC-SEL-006 | <strong>Response 204</strong></h4>
+<hr>
+<h4><code>GET /seller/order-groups</code> — UC-SEL-007, UC-SEL-008</h4>
+<p><strong>Auth:</strong> SELLER | <strong>Query:</strong> <code>status</code> (new/processing/shipped/delivered), <code>page</code>, <code>size</code></p>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [
+    {
+      &quot;id&quot;: &quot;group-uuid&quot;,
+      &quot;orderNumber&quot;: &quot;ORD-20250629-0001&quot;,
+      &quot;status&quot;: &quot;new&quot;,
+      &quot;subtotal&quot;: 300000,
+      &quot;shippingFee&quot;: 30000,
+      &quot;itemCount&quot;: 2,
+      &quot;buyer&quot;: { &quot;fullName&quot;: &quot;Nguyen V***&quot;, &quot;phone&quot;: &quot;+849***4567&quot; },
+      &quot;createdAt&quot;: &quot;2025-06-29T10:00:00Z&quot;
+    }
+  ],
+  &quot;meta&quot;: { ... }
+}
+</code></pre>
+<hr>
+<h4><code>GET /seller/order-groups/{groupId}</code> — UC-SEL-008</h4>
+<p><strong>Response:</strong> Group detail + items + shipping address đầy đủ (seller chỉ thấy group của mình)</p>
+<hr>
+<h4><code>PATCH /seller/order-groups/{groupId}</code> — UC-SEL-008, UC-SEL-009, UC-SEL-010</h4>
+<p><strong>Auth:</strong> SELLER (owner)</p>
+<p><strong>Request (confirm processing):</strong></p>
+<pre><code class="language-json">{ &quot;status&quot;: &quot;processing&quot; }
+</code></pre>
+<p><strong>Request (shipped — UC-SEL-009):</strong></p>
+<pre><code class="language-json">{
+  &quot;status&quot;: &quot;shipped&quot;,
+  &quot;shipment&quot;: {
+    &quot;carrier&quot;: &quot;GHN&quot;,
+    &quot;trackingNumber&quot;: &quot;GHN123456789&quot;
+  }
+}
+</code></pre>
+<p><strong>Request (delivered — UC-SEL-010):</strong></p>
+<pre><code class="language-json">{ &quot;status&quot;: &quot;delivered&quot; }
+</code></pre>
+<p><strong>Allowed transitions:</strong> <code>new</code>→<code>processing</code>→<code>shipped</code>→<code>delivered</code></p>
+<p><strong>Errors:</strong> <code>409 INVALID_STATUS_TRANSITION</code>, <code>400 TRACKING_REQUIRED</code></p>
+<p><strong>COD side effect:</strong> Khi <code>delivered</code> + <code>payment.awaiting_cod</code> → auto <code>payment.captured</code> (UC-BUY-010 bước 4)</p>
+<hr>
+<h4><code>GET /seller/dashboard</code> — UC-SEL-007</h4>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;newOrders&quot;: 5,
+  &quot;processingOrders&quot;: 12,
+  &quot;revenue30d&quot;: 45000000,
+  &quot;currency&quot;: &quot;VND&quot;,
+  &quot;topProducts&quot;: [{ &quot;name&quot;: &quot;...&quot;, &quot;soldQty&quot;: 42 }]
+}
+</code></pre>
+<hr>
+<h3>8.7 Admin — <code>UC-ADM-001</code> → <code>UC-ADM-007</code></h3>
+<h4><code>GET /admin/sellers</code> — UC-ADM-001</h4>
+<p><strong>Auth:</strong> ADMIN | <strong>Query:</strong> <code>status</code> (pending/approved/rejected/suspended), <code>q</code>, <code>page</code>, <code>size</code></p>
+<hr>
+<h4><code>GET /admin/sellers/{sellerId}</code> — UC-ADM-001</h4>
+<p><strong>Response:</strong> Full application + documents + user info</p>
+<hr>
+<h4><code>PATCH /admin/sellers/{sellerId}</code> — UC-ADM-001, UC-ADM-002</h4>
+<p><strong>Request (approve):</strong></p>
+<pre><code class="language-json">{ &quot;action&quot;: &quot;approve&quot; }
+</code></pre>
+<p><strong>Request (reject):</strong></p>
+<pre><code class="language-json">{ &quot;action&quot;: &quot;reject&quot;, &quot;reason&quot;: &quot;Giấy tờ không hợp lệ&quot; }
+</code></pre>
+<p><strong>Request (suspend — UC-ADM-002):</strong></p>
+<pre><code class="language-json">{ &quot;action&quot;: &quot;suspend&quot;, &quot;reason&quot;: &quot;Vi phạm chính sách&quot; }
+</code></pre>
+<p><strong>Request (reactivate):</strong></p>
+<pre><code class="language-json">{ &quot;action&quot;: &quot;reactivate&quot; }
+</code></pre>
+<p><strong>Response 200:</strong> Updated seller profile | <strong>Side effect:</strong> Audit log (UC-ADM-007)</p>
+<hr>
+<h4><code>GET /admin/categories</code> — UC-ADM-003</h4>
+<h4><code>POST /admin/categories</code> — UC-ADM-003</h4>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;Điện tử&quot;,
+  &quot;slug&quot;: &quot;dien-tu&quot;,
+  &quot;parentId&quot;: null,
+  &quot;sortOrder&quot;: 1,
+  &quot;imageUrl&quot;: &quot;https://...&quot;
+}
+</code></pre>
+<h4><code>PUT /admin/categories/{categoryId}</code> — cập nhật</h4>
+<h4><code>DELETE /admin/categories/{categoryId}</code> — <strong>Response 204</strong> (reject nếu còn SP/con)</h4>
+<hr>
+<h4><code>GET /admin/products</code> — UC-ADM-004, UC-ADM-005</h4>
+<p><strong>Query:</strong> <code>status</code>, <code>sellerId</code>, <code>q</code>, <code>page</code>, <code>size</code></p>
+<h4><code>PATCH /admin/products/{productId}</code> — UC-ADM-004</h4>
+<p><strong>Request:</strong> <code>{ &quot;action&quot;: &quot;suspend&quot;, &quot;reason&quot;: &quot;...&quot; }</code> hoặc <code>{ &quot;action&quot;: &quot;restore&quot; }</code></p>
+<hr>
+<h4><code>GET /admin/orders</code> — UC-ADM-005</h4>
+<p><strong>Query:</strong> <code>orderNumber</code>, <code>buyerEmail</code>, <code>sellerId</code>, <code>status</code>, <code>from</code>, <code>to</code>, <code>page</code>, <code>size</code></p>
+<hr>
+<h4><code>GET /admin/orders/{orderId}</code> — UC-ADM-005, UC-ADM-006</h4>
+<h4><code>PATCH /admin/order-groups/{groupId}</code> — UC-ADM-006 (P1)</h4>
+<p><strong>Request:</strong> <code>{ &quot;action&quot;: &quot;cancel&quot;, &quot;reason&quot;: &quot;Dispute resolved&quot; }</code></p>
+<hr>
+<h4><code>GET /admin/audit-logs</code> — UC-ADM-007</h4>
+<p><strong>Query:</strong> <code>actorId</code>, <code>action</code>, <code>from</code>, <code>to</code>, <code>page</code>, <code>size</code></p>
+<p><strong>Response:</strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [
+    {
+      &quot;id&quot;: &quot;uuid&quot;,
+      &quot;actor&quot;: { &quot;id&quot;: &quot;uuid&quot;, &quot;email&quot;: &quot;admin@...&quot; },
+      &quot;action&quot;: &quot;SELLER_APPROVED&quot;,
+      &quot;targetType&quot;: &quot;SellerProfile&quot;,
+      &quot;targetId&quot;: &quot;uuid&quot;,
+      &quot;metadata&quot;: { &quot;shopName&quot;: &quot;TechShop&quot; },
+      &quot;createdAt&quot;: &quot;2025-06-29T10:00:00Z&quot;
+    }
+  ]
+}
+</code></pre>
+<hr>
+<h3>8.8 Webhooks — <code>UC-BUY-009</code>, <code>UC-SYS-003</code>, <code>UC-SYS-004</code></h3>
+<h4><code>POST /webhooks/stripe</code> — UC-BUY-009, UC-SYS-003</h4>
+<p><strong>Auth:</strong> Stripe signature header <code>Stripe-Signature</code></p>
+<p><strong>Body:</strong> Raw Stripe event JSON</p>
+<p><strong>Xử lý:</strong></p>
+<ul>
+<li><code>payment_intent.succeeded</code> → order paid, inventory deduct, email (UC-SYS-004)</li>
+<li><code>payment_intent.payment_failed</code> → payment failed</li>
+</ul>
+<p><strong>Response:</strong> <code>200 { &quot;received&quot;: true }</code> (idempotent theo <code>event.id</code>)</p>
+<hr>
+<h4><code>POST /webhooks/vnpay</code> — UC-BUY-009</h4>
+<p><strong>Auth:</strong> Verify <code>vnp_SecureHash</code></p>
+<p><strong>Body:</strong> VNPay IPN params (form/query)</p>
+<p><strong>Response:</strong> <code>{ &quot;RspCode&quot;: &quot;00&quot;, &quot;Message&quot;: &quot;Confirm Success&quot; }</code></p>
+<hr>
+<h4><code>POST /webhooks/momo</code> — UC-BUY-009</h4>
+<p><strong>Auth:</strong> MoMo signature header</p>
+<p><strong>Body:</strong> MoMo callback JSON</p>
+<p><strong>Response:</strong> <code>200</code> với MoMo expected ack format</p>
+<hr>
+<h3>8.9 Shared DTOs &amp; Enum reference</h3>
+<p><strong>OrderStatus:</strong> <code>pending_payment</code> | <code>awaiting_cod</code> | <code>paid</code> | <code>confirmed</code> | <code>completed</code> | <code>cancelled</code></p>
+<p><strong>OrderGroupStatus:</strong> <code>new</code> | <code>processing</code> | <code>shipped</code> | <code>delivered</code> | <code>cancelled</code></p>
+<p><strong>PaymentStatus:</strong> <code>pending</code> | <code>paid</code> | <code>failed</code> | <code>awaiting_cod</code> | <code>captured</code> | <code>refunded</code></p>
+<p><strong>PaymentMethod:</strong> <code>STRIPE</code> | <code>VNPAY</code> | <code>MOMO</code> | <code>COD</code></p>
+<p><strong>SellerStatus:</strong> <code>pending</code> | <code>approved</code> | <code>rejected</code> | <code>suspended</code></p>
+<p><strong>ProductStatus:</strong> <code>draft</code> | <code>active</code> | <code>inactive</code> | <code>suspended</code></p>
+<p><strong>Carrier:</strong> <code>GHN</code> | <code>GHTK</code> | <code>FEDEX</code> | <code>UPS</code> | <code>USPS</code> | <code>OTHER</code></p>
+<hr>
+<h3>8.10 Rate limits (MVP)</h3>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>POST /auth/login</code></td>
+<td>10 req/min/IP</td>
+</tr>
+<tr>
+<td><code>POST /auth/register</code></td>
+<td>5 req/min/IP</td>
+</tr>
+<tr>
+<td><code>POST /checkout</code></td>
+<td>5 req/min/user</td>
+</tr>
+<tr>
+<td><code>POST /cart/items</code></td>
+<td>60 req/min/session</td>
+</tr>
+<tr>
+<td>Webhooks</td>
+<td>1000 req/min (no limit thực tế)</td>
+</tr>
+</tbody></table>
+<hr>
+<h3>8.11 OpenAPI file structure (đề xuất)</h3>
+<pre><code>docs/api/
+  openapi.yaml          # Entry, servers, securitySchemes
+  paths/
+    auth.yaml
+    catalog.yaml
+    cart.yaml
+    checkout.yaml
+    orders.yaml
+    seller.yaml
+    admin.yaml
+    webhooks.yaml
+  schemas/
+    User.yaml
+    Product.yaml
+    Cart.yaml
+    Order.yaml
+    Error.yaml
+</code></pre>
+<p>Generate TypeScript client: <code>openapi-generator-cli generate -i docs/api/openapi.yaml -g typescript-fetch -o frontend/packages/api-client</code></p>
+<hr>
+<h2>9. Thanh toán đa thị trường</h2>
+<table>
+<thead>
+<tr>
+<th>Thị trường</th>
+<th>Provider</th>
+<th>Luồng MVP</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Quốc tế</td>
+<td><strong>Stripe</strong></td>
+<td>Payment Intent + webhook</td>
+</tr>
+<tr>
+<td>Việt Nam</td>
+<td><strong>VNPay</strong></td>
+<td>Redirect URL + IPN callback</td>
+</tr>
+<tr>
+<td>Việt Nam</td>
+<td><strong>Momo</strong></td>
+<td>Redirect + webhook</td>
+</tr>
+<tr>
+<td>Cả hai</td>
+<td><strong>COD</strong></td>
+<td>Order status = pending_payment, admin/seller confirm</td>
+</tr>
+</tbody></table>
+<p><strong>Chiến lược currency:</strong></p>
+<ul>
+<li>Lưu giá SP theo <code>currency</code> của seller (VND hoặc USD)</li>
+<li>Checkout: không mix currency trong 1 order (validate ở cart)</li>
+<li>Hiển thị: format theo locale (vi-VN / en-US)</li>
+</ul>
+<p><strong>Payment adapter pattern</strong> (Spring):</p>
+<pre><code class="language-java">interface PaymentProvider {
+  PaymentSession createSession(CheckoutRequest req);
+  PaymentResult handleWebhook(String payload, Map headers);
+}
+// StripePaymentProvider, VNPayPaymentProvider, MomoPaymentProvider
+</code></pre>
+<hr>
+<h2>10. Vận chuyển</h2>
+<p><strong>MVP:</strong></p>
+<ul>
+<li>Flat rate theo khu vực (VN: miền Bắc/Trung/Nam; Global: zone-based)</li>
+<li>Seller chọn carrier được hỗ trợ</li>
+<li>Manual tracking: seller nhập tracking number</li>
+</ul>
+<p><strong>Tích hợp phase 2</strong> (có thể tái sử dụng kinh nghiệm từ scripts hiện có: FedEx, UPS, USPS):</p>
+<ul>
+<li>API rate quote tại checkout</li>
+<li>Webhook tracking status</li>
+</ul>
+<hr>
+<h2>11. Giao diện người dùng (màn hình MVP)</h2>
+<h3>Buyer app</h3>
+<ul>
+<li>Home, Category listing, Product detail (variant picker)</li>
+<li>Cart, Checkout (address + payment method), Order history/detail</li>
+<li>Login/Register, Profile, Address book</li>
+</ul>
+<h3>Seller portal</h3>
+<ul>
+<li>Dashboard (đơn mới, doanh thu đơn giản)</li>
+<li>Product list/create/edit</li>
+<li>Order list + cập nhật trạng thái (processing → shipped → delivered)</li>
+</ul>
+<h3>Admin portal</h3>
+<ul>
+<li>Seller approval queue</li>
+<li>Order overview</li>
+<li>Category management</li>
+<li>User/seller search</li>
+</ul>
+<hr>
+<h2>12. Bảo mật &amp; tuân thủ</h2>
+<ul>
+<li>HTTPS everywhere; JWT httpOnly cookie hoặc Bearer + short TTL</li>
+<li>RBAC: <code>@PreAuthorize(&quot;hasRole(&#39;SELLER&#39;)&quot;)</code> + kiểm tra ownership (seller chỉ sửa SP của mình)</li>
+<li>Rate limiting (Redis): login, checkout, webhook</li>
+<li>Validate webhook signature (Stripe/VNPay/Momo)</li>
+<li>Không lưu PAN/card data — dùng hosted fields/redirect</li>
+<li>Audit log cho admin actions</li>
+<li>Input sanitization (XSS), SQL injection qua JPA parameterized</li>
+<li>CORS whitelist theo domain frontend</li>
+</ul>
+<hr>
+<h2>13. DevOps &amp; môi trường</h2>
+<pre><code>environments: local → staging → production
+
+local:     Docker Compose (Postgres, Redis, MinIO)
+staging:   VPS hoặc AWS (EC2/RDS/ElastiCache)
+prod:      AWS/GCP hoặc VPS + CDN (Cloudflare)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Thành phần</th>
+<th>Công cụ</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CI/CD</td>
+<td>GitHub Actions: test → build JAR → build React → deploy</td>
+</tr>
+<tr>
+<td>Backend deploy</td>
+<td>Docker image → ECS/EC2 hoặc Railway</td>
+</tr>
+<tr>
+<td>Frontend deploy</td>
+<td>S3 + CloudFront hoặc Vercel/Netlify</td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td>AWS Secrets Manager / Vault</td>
+</tr>
+<tr>
+<td>Monitoring</td>
+<td>Sentry (errors) + Prometheus/Grafana (phase 2)</td>
+</tr>
+<tr>
+<td>Logs</td>
+<td>Structured JSON (Logback) → CloudWatch/Loki</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>14. Cấu trúc repository đề xuất</h2>
+<pre><code>marketplace/
+  backend/                 # Spring Boot
+  frontend/
+    apps/buyer/
+    apps/seller/
+    apps/admin/
+    packages/ui/
+    packages/api-client/
+  docker-compose.yml
+  docs/
+    api/                   # OpenAPI spec
+    adr/                   # Architecture decisions
+  .github/workflows/
+</code></pre>
+<hr>
+<h2>15. Lộ trình triển khai (ước tính 10–14 tuần, 2–3 dev)</h2>
+<h3>Phase 0 — Setup (Tuần 1)</h3>
+<ul>
+<li>Khởi tạo repo, Docker Compose, CI cơ bản</li>
+<li>DB schema v1 (Flyway), seed categories</li>
+<li>Auth (register/login/JWT), role model</li>
+</ul>
+<h3>Phase 1 — Catalog (Tuần 2–3)</h3>
+<ul>
+<li>Category CRUD (admin)</li>
+<li>Product/variant/inventory (seller)</li>
+<li>Buyer: listing, search, product detail</li>
+<li>Upload ảnh S3/MinIO</li>
+</ul>
+<h3>Phase 2 — Cart &amp; Checkout (Tuần 4–5)</h3>
+<ul>
+<li>Cart API + Redis reservation</li>
+<li>Address management</li>
+<li>Order creation + split by seller</li>
+<li>Shipping fee calculation (flat rate)</li>
+</ul>
+<h3>Phase 3 — Payment (Tuần 6–7)</h3>
+<ul>
+<li>Stripe integration + webhook</li>
+<li>VNPay redirect + IPN</li>
+<li>Momo (song song hoặc sau VNPay 1 tuần)</li>
+<li>COD fallback</li>
+<li>Email xác nhận đơn (async)</li>
+</ul>
+<h3>Phase 4 — Seller &amp; Admin portals (Tuần 8–9)</h3>
+<ul>
+<li>Seller onboarding + admin approval</li>
+<li>Seller order fulfillment flow</li>
+<li>Admin dashboards cơ bản</li>
+</ul>
+<h3>Phase 5 — QA &amp; Launch (Tuần 10–12)</h3>
+<ul>
+<li>E2E tests (Playwright): happy path checkout</li>
+<li>Load test checkout endpoint</li>
+<li>i18n vi/en</li>
+<li>Security review, staging UAT</li>
+<li>Production deploy + runbook</li>
+</ul>
+<hr>
+<h2>16. Testing strategy</h2>
+<table>
+<thead>
+<tr>
+<th>Loại</th>
+<th>Phạm vi</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Unit</td>
+<td>Service layer (order split, inventory, payment adapter)</td>
+</tr>
+<tr>
+<td>Integration</td>
+<td>Repository + Testcontainers (Postgres, Redis)</td>
+</tr>
+<tr>
+<td>API</td>
+<td>MockMvc / RestAssured</td>
+</tr>
+<tr>
+<td>E2E</td>
+<td>Playwright: browse → cart → Stripe test mode → order</td>
+</tr>
+<tr>
+<td>Contract</td>
+<td>OpenAPI spec làm source of truth; generate client</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>17. Rủi ro &amp; giảm thiểu</h2>
+<table>
+<thead>
+<tr>
+<th>Rủi ro</th>
+<th>Giảm thiểu</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Overselling</td>
+<td>Reservation + transactional inventory deduct</td>
+</tr>
+<tr>
+<td>Payment webhook miss</td>
+<td>Idempotent handler + reconciliation job</td>
+</tr>
+<tr>
+<td>Multi-seller checkout phức tạp</td>
+<td>OrderGroup model từ đầu; 1 payment cho cả order</td>
+</tr>
+<tr>
+<td>Scope creep</td>
+<td>Khóa MVP scope; mọi feature ngoài list → backlog</td>
+</tr>
+<tr>
+<td>Đa currency</td>
+<td>Không mix currency; phase 2 mới auto-convert</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>18. Tiêu chí hoàn thành MVP (Definition of Done)</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Buyer đăng ký, mua được SP từ &gt;= 2 seller trong 1 checkout</li>
+<li><input disabled="" type="checkbox"> Thanh toán thành công qua Stripe (USD) và VNPay (VND)</li>
+<li><input disabled="" type="checkbox"> Seller tạo SP, nhận đơn, cập nhật shipped + tracking</li>
+<li><input disabled="" type="checkbox"> Admin duyệt seller mới</li>
+<li><input disabled="" type="checkbox"> Email xác nhận đơn gửi được</li>
+<li><input disabled="" type="checkbox"> Deploy staging + production, HTTPS, basic monitoring</li>
+<li><input disabled="" type="checkbox"> Tài liệu API (OpenAPI) và README setup local</li>
+</ul>
+<hr>
+<h2>19. Module Auth — Thiết kế chi tiết</h2>
+<p>Module Auth chịu trách nhiệm xác thực danh tính, cấp phát token, quản lý role, và bảo vệ các API protected. Không xử lý seller onboarding (module <code>seller/</code>) hay profile CRUD (module <code>user/</code>) — chỉ tạo user + gán role <code>BUYER</code> ban đầu.</p>
+<h3>19.1 Phạm vi &amp; ranh giới module</h3>
+<table>
+<thead>
+<tr>
+<th>Thuộc Auth</th>
+<th>Không thuộc Auth</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Register / Login / Logout</td>
+<td>CRUD profile (<code>user/</code>)</td>
+</tr>
+<tr>
+<td>JWT access + refresh token</td>
+<td>Seller application (<code>seller/</code>)</td>
+</tr>
+<tr>
+<td>Forgot / Reset password</td>
+<td>Admin duyệt seller (trigger gán SELLER)</td>
+</tr>
+<tr>
+<td>RBAC enforcement</td>
+<td>Guest cart logic (<code>cart/</code>)</td>
+</tr>
+<tr>
+<td>Account status (active/suspended)</td>
+<td>Email template nội dung đơn hàng</td>
+</tr>
+<tr>
+<td>Rate limit login/register</td>
+<td></td>
+</tr>
+</tbody></table>
+<p><strong>Use cases phụ trách:</strong> UC-BUY-001, UC-BUY-002, UC-BUY-003 + hạ tầng RBAC cho toàn bộ API.</p>
+<pre><code class="language-mermaid">flowchart TB
+  subgraph authModule [auth_package]
+    AuthController
+    AuthService
+    TokenService
+    PasswordService
+    UserDetailsServiceImpl
+    JwtAuthFilter
+    SecurityConfig
+  end
+
+  subgraph deps [Dependencies]
+    UserRepo[(users)]
+    RefreshTokenRepo[(refresh_tokens)]
+    ResetTokenRepo[(password_reset_tokens)]
+    Redis[(Redis)]
+    MailQueue[EmailQueue]
+  end
+
+  AuthController --&gt; AuthService
+  AuthService --&gt; TokenService
+  AuthService --&gt; PasswordService
+  AuthService --&gt; UserRepo
+  TokenService --&gt; RefreshTokenRepo
+  TokenService --&gt; Redis
+  PasswordService --&gt; ResetTokenRepo
+  PasswordService --&gt; MailQueue
+  JwtAuthFilter --&gt; TokenService
+  JwtAuthFilter --&gt; UserDetailsServiceImpl
+  UserDetailsServiceImpl --&gt; UserRepo
+</code></pre>
+<hr>
+<h3>19.2 Database schema</h3>
+<h4>Bảng <code>users</code></h4>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Constraints</th>
+<th>Mô tả</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>UUID</td>
+<td>PK</td>
+<td></td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>VARCHAR(255)</td>
+<td>UNIQUE, NOT NULL</td>
+<td>Lowercase normalized</td>
+</tr>
+<tr>
+<td><code>password_hash</code></td>
+<td>VARCHAR(255)</td>
+<td>NOT NULL</td>
+<td>BCrypt strength 12</td>
+</tr>
+<tr>
+<td><code>full_name</code></td>
+<td>VARCHAR(100)</td>
+<td>NOT NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>phone</code></td>
+<td>VARCHAR(20)</td>
+<td>NULL</td>
+<td>E.164</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>VARCHAR(20)</td>
+<td>NOT NULL, default <code>active</code></td>
+<td><code>active</code></td>
+</tr>
+<tr>
+<td><code>email_verified</code></td>
+<td>BOOLEAN</td>
+<td>default false</td>
+<td>MVP: optional verify</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>TIMESTAMPTZ</td>
+<td>NOT NULL</td>
+<td></td>
+</tr>
+<tr>
+<td><code>last_login_at</code></td>
+<td>TIMESTAMPTZ</td>
+<td>NULL</td>
+<td></td>
+</tr>
+</tbody></table>
+<h4>Bảng <code>user_roles</code> (many-to-many, hoặc <code>roles TEXT[]</code> trên users)</h4>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Mô tả</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>user_id</code></td>
+<td>UUID</td>
+<td>FK → users</td>
+</tr>
+<tr>
+<td><code>role</code></td>
+<td>VARCHAR(20)</td>
+<td><code>BUYER</code></td>
+</tr>
+</tbody></table>
+<p><strong>Quy tắc role:</strong></p>
+<ul>
+<li>Register → auto gán <code>BUYER</code></li>
+<li>Admin approve seller → thêm <code>SELLER</code> (không xóa BUYER)</li>
+<li><code>ADMIN</code> seed bằng migration/SQL, không đăng ký public</li>
+</ul>
+<h4>Bảng <code>refresh_tokens</code></h4>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Mô tả</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>UUID</td>
+<td>PK</td>
+</tr>
+<tr>
+<td><code>user_id</code></td>
+<td>UUID</td>
+<td>FK</td>
+</tr>
+<tr>
+<td><code>token_hash</code></td>
+<td>VARCHAR(64)</td>
+<td>SHA-256 của refresh token (không lưu plain)</td>
+</tr>
+<tr>
+<td><code>family_id</code></td>
+<td>UUID</td>
+<td>Nhóm rotation — phát hiện token reuse</td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>TIMESTAMPTZ</td>
+<td>7 ngày</td>
+</tr>
+<tr>
+<td><code>revoked_at</code></td>
+<td>TIMESTAMPTZ</td>
+<td>NULL nếu còn hiệu lực</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>TIMESTAMPTZ</td>
+<td></td>
+</tr>
+<tr>
+<td><code>user_agent</code></td>
+<td>VARCHAR(512)</td>
+<td>Optional audit</td>
+</tr>
+<tr>
+<td><code>ip_address</code></td>
+<td>VARCHAR(45)</td>
+<td>Optional audit</td>
+</tr>
+</tbody></table>
+<h4>Bảng <code>password_reset_tokens</code></h4>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Mô tả</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>UUID</td>
+<td>PK</td>
+</tr>
+<tr>
+<td><code>user_id</code></td>
+<td>UUID</td>
+<td>FK</td>
+</tr>
+<tr>
+<td><code>token_hash</code></td>
+<td>VARCHAR(64)</td>
+<td>SHA-256</td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>TIMESTAMPTZ</td>
+<td>1 giờ</td>
+</tr>
+<tr>
+<td><code>used_at</code></td>
+<td>TIMESTAMPTZ</td>
+<td>NULL = chưa dùng</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>TIMESTAMPTZ</td>
+<td></td>
+</tr>
+</tbody></table>
+<p><strong>Index:</strong> <code>users(email)</code>, <code>refresh_tokens(token_hash)</code>, <code>password_reset_tokens(token_hash)</code></p>
+<hr>
+<h3>19.3 Chiến lược JWT</h3>
+<h4>Access Token</h4>
+<table>
+<thead>
+<tr>
+<th>Thuộc tính</th>
+<th>Giá trị MVP</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Algorithm</td>
+<td>HS256 (MVP) hoặc RS256 (prod khuyến nghị)</td>
+</tr>
+<tr>
+<td>TTL</td>
+<td><strong>15 phút</strong> (900s)</td>
+</tr>
+<tr>
+<td>Storage (client)</td>
+<td>Memory (React state) hoặc sessionStorage — <strong>không</strong> localStorage nếu có XSS risk cao</td>
+</tr>
+<tr>
+<td>Transport</td>
+<td><code>Authorization: Bearer {token}</code></td>
+</tr>
+</tbody></table>
+<p><strong>JWT Claims (payload):</strong></p>
+<pre><code class="language-json">{
+  &quot;sub&quot;: &quot;user-uuid&quot;,
+  &quot;email&quot;: &quot;buyer@example.com&quot;,
+  &quot;roles&quot;: [&quot;BUYER&quot;, &quot;SELLER&quot;],
+  &quot;iat&quot;: 1719648000,
+  &quot;exp&quot;: 1719648900,
+  &quot;jti&quot;: &quot;unique-token-id&quot;
+}
+</code></pre>
+<p>Không nhúng PII nhạy cảm (phone, address) vào JWT.</p>
+<h4>Refresh Token</h4>
+<table>
+<thead>
+<tr>
+<th>Thuộc tính</th>
+<th>Giá trị</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Format</td>
+<td>Opaque random 256-bit, Base64URL</td>
+</tr>
+<tr>
+<td>TTL</td>
+<td><strong>7 ngày</strong></td>
+</tr>
+<tr>
+<td>Storage (client)</td>
+<td><strong>httpOnly Secure SameSite=Strict cookie</strong> (khuyến nghị) hoặc body JSON (MVP đơn giản)</td>
+</tr>
+<tr>
+<td>Rotation</td>
+<td>Mỗi lần refresh → revoke token cũ, cấp token mới cùng <code>family_id</code></td>
+</tr>
+</tbody></table>
+<h4>Refresh Token Rotation + Reuse Detection</h4>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant C as Client
+  participant API as AuthService
+  participant DB as refresh_tokens
+
+  C-&gt;&gt;API: POST_refresh_with_RT1
+  API-&gt;&gt;DB: Validate_RT1_family_F1
+  API-&gt;&gt;DB: Revoke_RT1
+  API-&gt;&gt;DB: Create_RT2_family_F1
+  API--&gt;&gt;C: New_access_plus_RT2
+
+  Note over C,DB: Attacker reuses stolen RT1
+  C-&gt;&gt;API: POST_refresh_with_RT1_again
+  API-&gt;&gt;DB: RT1_already_revoked
+  API-&gt;&gt;DB: Revoke_all_tokens_in_family_F1
+  API--&gt;&gt;C: 401_FORCE_RELOGIN
+</code></pre>
+<p>Nếu phát hiện reuse → revoke toàn bộ family → buộc user đăng nhập lại (bảo vệ token theft).</p>
+<hr>
+<h3>19.4 RBAC — Role &amp; Permission</h3>
+<h4>Ma trận quyền theo role</h4>
+<table>
+<thead>
+<tr>
+<th>Resource / Action</th>
+<th>Guest</th>
+<th>BUYER</th>
+<th>SELLER</th>
+<th>ADMIN</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Xem catalog public</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Quản lý giỏ/checkout</td>
+<td>—</td>
+<td>Own</td>
+<td>Own</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Xem đơn hàng</td>
+<td>—</td>
+<td>Own orders</td>
+<td>Own shop groups</td>
+<td>All</td>
+</tr>
+<tr>
+<td>CRUD sản phẩm</td>
+<td>—</td>
+<td>—</td>
+<td>Own shop</td>
+<td>All (read)</td>
+</tr>
+<tr>
+<td>Seller application</td>
+<td>—</td>
+<td>Yes</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Duyệt seller</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>CRUD categories</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Audit logs</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<h4>Spring Security expression mapping</h4>
+<pre><code class="language-java">// Ví dụ annotation trên controller
+@PreAuthorize(&quot;hasRole(&#39;BUYER&#39;)&quot;)           // cart, checkout, orders
+@PreAuthorize(&quot;hasRole(&#39;SELLER&#39;)&quot;)          // seller/* — + ownership check trong service
+@PreAuthorize(&quot;hasRole(&#39;ADMIN&#39;)&quot;)           // admin/*
+@PreAuthorize(&quot;permitAll()&quot;)                 // auth/register, catalog public
+</code></pre>
+<p><strong>Ownership check (SELLER):</strong> Auth chỉ verify role; service layer verify <code>sellerProfile.userId == currentUser.id</code> hoặc <code>product.sellerId == currentSeller.id</code>.</p>
+<p><strong>SELLER chưa approved:</strong> User có role SELLER nhưng <code>sellerProfile.status != approved</code> → chặn <code>POST /seller/products</code> với <code>403 SELLER_NOT_APPROVED</code>.</p>
+<hr>
+<h3>19.5 Spring Security — Filter chain</h3>
+<pre><code class="language-mermaid">flowchart LR
+  Request --&gt; CorsFilter
+  CorsFilter --&gt; RateLimitFilter
+  RateLimitFilter --&gt; JwtAuthFilter
+  JwtAuthFilter --&gt; UsernamePasswordAuthFilter
+  UsernamePasswordAuthFilter --&gt; Controller
+</code></pre>
+<p><code>**SecurityFilterChain</code> config (MVP):**</p>
+<table>
+<thead>
+<tr>
+<th>Path pattern</th>
+<th>Access</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>POST /api/v1/auth/register</code></td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/auth/login</code></td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/auth/refresh</code></td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/auth/forgot-password</code></td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/auth/reset-password</code></td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/categories/</code>**</td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/products/</code>**</td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/shops/</code>**</td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/webhooks/**</code></td>
+<td>permitAll + signature verify riêng</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/cart</code></td>
+<td>permitAll (guest hoặc user)</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/cart/**</code></td>
+<td>permitAll (guest hoặc user)</td>
+</tr>
+<tr>
+<td><code>/api/v1/seller/**</code></td>
+<td>hasRole SELLER</td>
+</tr>
+<tr>
+<td><code>/api/v1/admin/**</code></td>
+<td>hasRole ADMIN</td>
+</tr>
+<tr>
+<td><code>/api/v1/**</code> còn lại</td>
+<td>authenticated</td>
+</tr>
+</tbody></table>
+<p><code>**JwtAuthFilter</code> logic:**</p>
+<ol>
+<li>Đọc <code>Authorization: Bearer</code> header</li>
+<li>Không có token → pass through (endpoint permitAll) hoặc 401 (protected)</li>
+<li>Parse JWT, verify signature + expiry</li>
+<li>Load <code>UserDetails</code> từ cache/DB</li>
+<li>Kiểm tra <code>user.status == active</code> → không thì 403</li>
+<li>Set <code>SecurityContextHolder</code></li>
+</ol>
+<hr>
+<h3>19.6 Cấu trúc code (Spring Boot)</h3>
+<pre><code>backend/src/main/java/com/marketplace/auth/
+  config/
+    SecurityConfig.java
+    PasswordEncoderConfig.java        # BCryptPasswordEncoder strength 12
+  controller/
+    AuthController.java
+  dto/
+    RegisterRequest.java
+    LoginRequest.java
+    AuthResponse.java
+    RefreshRequest.java
+    ForgotPasswordRequest.java
+    ResetPasswordRequest.java
+  entity/
+    RefreshToken.java
+    PasswordResetToken.java
+  repository/
+    RefreshTokenRepository.java
+    PasswordResetTokenRepository.java
+  security/
+    JwtAuthFilter.java
+    JwtTokenProvider.java
+    UserPrincipal.java                # implements UserDetails
+    UserDetailsServiceImpl.java
+  service/
+    AuthService.java
+    TokenService.java
+    PasswordResetService.java
+  exception/
+    InvalidCredentialsException.java
+    TokenExpiredException.java
+    AccountSuspendedException.java
+</code></pre>
+<p><code>**user/</code> package (liên quan):**</p>
+<pre><code>user/
+  entity/User.java
+  entity/UserRole.java
+  repository/UserRepository.java
+  service/UserService.java          # findByEmail, createUser
+</code></pre>
+<hr>
+<h3>19.7 Luồng chi tiết từng chức năng</h3>
+<h4>19.7.1 Register — UC-BUY-001</h4>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant C as Client
+  participant AC as AuthController
+  participant AS as AuthService
+  participant US as UserService
+  participant TS as TokenService
+  participant DB as PostgreSQL
+
+  C-&gt;&gt;AC: POST_register
+  AC-&gt;&gt;AS: register(dto)
+  AS-&gt;&gt;AS: Validate_email_password
+  AS-&gt;&gt;US: existsByEmail?
+  alt email_exists
+    AS--&gt;&gt;C: 409_EMAIL_ALREADY_EXISTS
+  end
+  AS-&gt;&gt;US: createUser_BUYER_role
+  US-&gt;&gt;DB: INSERT_users_user_roles
+  AS-&gt;&gt;TS: generateTokenPair(user)
+  TS-&gt;&gt;DB: INSERT_refresh_token
+  AS--&gt;&gt;C: 201_AuthResponse
+</code></pre>
+<p><strong>Validation rules:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>email</code></td>
+<td>RFC 5322 format, max 255, lowercase trim</td>
+</tr>
+<tr>
+<td><code>password</code></td>
+<td>Min 8, max 128, ít nhất 1 chữ + 1 số</td>
+</tr>
+<tr>
+<td><code>fullName</code></td>
+<td>2–100 ký tự, không toàn space</td>
+</tr>
+<tr>
+<td><code>phone</code></td>
+<td>Optional, regex E.164</td>
+</tr>
+</tbody></table>
+<p><strong>Password hashing:</strong> <code>BCrypt.hashpw(password, BCrypt.gensalt(12))</code></p>
+<hr>
+<h4>19.7.2 Login — UC-BUY-002</h4>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant C as Client
+  participant AS as AuthService
+  participant DB as PostgreSQL
+  participant R as Redis
+
+  C-&gt;&gt;AS: POST_login
+  AS-&gt;&gt;R: INCR_login_attempts_ip
+  alt rate_limit_exceeded
+    AS--&gt;&gt;C: 429_TOO_MANY_REQUESTS
+  end
+  AS-&gt;&gt;DB: findByEmail
+  alt user_not_found_or_bad_password
+    AS--&gt;&gt;C: 401_INVALID_CREDENTIALS
+  end
+  alt status_suspended
+    AS--&gt;&gt;C: 403_ACCOUNT_SUSPENDED
+  end
+  AS-&gt;&gt;DB: UPDATE_last_login_at
+  AS-&gt;&gt;AS: generateTokenPair
+  AS-&gt;&gt;R: DEL_login_attempts_ip
+  AS--&gt;&gt;C: 200_AuthResponse
+</code></pre>
+<p><strong>Timing attack mitigation:</strong> Luôn chạy BCrypt compare kể cả khi user không tồn tại (dùng dummy hash).</p>
+<p><strong>Post-login (client):</strong></p>
+<ol>
+<li>Lưu <code>accessToken</code> (memory/sessionStorage)</li>
+<li>Lưu <code>refreshToken</code> (httpOnly cookie nếu dùng cookie mode)</li>
+<li>Gọi <code>POST /cart/merge</code> nếu có guest session</li>
+<li>Redirect về trang trước hoặc home</li>
+</ol>
+<hr>
+<h4>19.7.3 Refresh — UC-BUY-002</h4>
+<p><strong>Request:</strong> <code>{ &quot;refreshToken&quot;: &quot;...&quot; }</code> hoặc đọc từ httpOnly cookie</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Hash refresh token → lookup DB</li>
+<li>Kiểm tra <code>revoked_at IS NULL</code> và <code>expires_at &gt; now</code></li>
+<li>Nếu revoked nhưng vẫn gửi lên → <strong>reuse attack</strong> → revoke cả family</li>
+<li>Revoke token hiện tại</li>
+<li>Tạo access token mới + refresh token mới (cùng family_id)</li>
+<li>Trả response</li>
+</ol>
+<p><strong>Response:</strong> <code>{ accessToken, refreshToken, expiresIn: 900 }</code></p>
+<hr>
+<h4>19.7.4 Logout — UC-BUY-002</h4>
+<p><strong>Auth:</strong> Bearer access token (optional — vẫn logout được chỉ với refresh)</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Hash refresh token từ body/cookie</li>
+<li>Set <code>revoked_at = now</code> trên DB</li>
+<li>Thêm <code>jti</code> access token vào Redis blacklist (TTL = thời gian còn lại của access token) — optional MVP</li>
+<li>Response <code>204</code></li>
+</ol>
+<p><strong>Logout all devices (P1):</strong> <code>POST /auth/logout-all</code> → revoke tất cả refresh tokens của user</p>
+<hr>
+<h4>19.7.5 Forgot Password — UC-BUY-003</h4>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant C as Client
+  participant AS as PasswordResetService
+  participant DB as PostgreSQL
+  participant Mail as EmailQueue
+
+  C-&gt;&gt;AS: POST_forgot_password
+  AS-&gt;&gt;DB: findByEmail
+  alt user_exists
+    AS-&gt;&gt;AS: generate_secure_token_32_bytes
+    AS-&gt;&gt;DB: INSERT_password_reset_token
+    AS-&gt;&gt;Mail: send_reset_email
+  end
+  AS--&gt;&gt;C: 200_generic_message
+</code></pre>
+<p><strong>Email link:</strong> <code>https://buyer.example.com/reset-password?token={plainToken}</code></p>
+<p><strong>Token:</strong> 32 bytes random → SHA-256 lưu DB; plain chỉ gửi email, TTL 1 giờ, one-time use.</p>
+<p><strong>Luôn trả 200</strong> dù email không tồn tại — message: <code>&quot;If the email exists, a reset link has been sent.&quot;</code></p>
+<hr>
+<h4>19.7.6 Reset Password — UC-BUY-003</h4>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Hash token từ request → lookup <code>password_reset_tokens</code></li>
+<li>Kiểm tra <code>used_at IS NULL</code> và <code>expires_at &gt; now</code></li>
+<li>Validate <code>newPassword</code> (cùng rule register)</li>
+<li>Update <code>users.password_hash</code></li>
+<li>Set <code>used_at = now</code> trên reset token</li>
+<li><strong>Revoke tất cả refresh tokens</strong> của user (buộc login lại)</li>
+<li>Response 200</li>
+</ol>
+<p><strong>Errors:</strong> <code>400 TOKEN_INVALID</code>, <code>400 TOKEN_EXPIRED</code>, <code>400 VALIDATION_ERROR</code></p>
+<hr>
+<h3>19.8 Gán role SELLER (tích hợp cross-module)</h3>
+<p>Auth không tự gán SELLER khi user apply shop. Luồng:</p>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant Admin as AdminService
+  participant UserSvc as UserService
+  participant DB as PostgreSQL
+
+  Admin-&gt;&gt;Admin: PATCH_seller_approve
+  Admin-&gt;&gt;UserSvc: addRole(userId_SELLER)
+  UserSvc-&gt;&gt;DB: INSERT_user_roles_SELLER
+  Note over Admin,DB: JWT hiện tại chưa có SELLER
+  Note over Admin,DB: User cần refresh token hoặc login lại
+</code></pre>
+<p><strong>Khuyến nghị:</strong> Sau approve, frontend seller portal prompt &quot;Phiên đăng nhập cần làm mới&quot; → gọi <code>POST /auth/refresh</code> hoặc re-login để JWT có role mới.</p>
+<p><code>AuthService.addRole(UUID userId, Role role)</code> — public API nội bộ cho <code>admin/</code> và <code>seller/</code> modules.</p>
+<hr>
+<h3>19.9 Redis keys</h3>
+<table>
+<thead>
+<tr>
+<th>Key pattern</th>
+<th>TTL</th>
+<th>Mục đích</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>auth:login_attempts:{ip}</code></td>
+<td>15 min</td>
+<td>Rate limit login, max 10</td>
+</tr>
+<tr>
+<td><code>auth:register_attempts:{ip}</code></td>
+<td>1 hour</td>
+<td>Max 5 register</td>
+</tr>
+<tr>
+<td><code>auth:access_blacklist:{jti}</code></td>
+<td>= access token remaining</td>
+<td>Logout instant invalidate</td>
+</tr>
+<tr>
+<td><code>auth:user_roles:{userId}</code></td>
+<td>5 min</td>
+<td>Cache roles cho JwtFilter</td>
+</tr>
+</tbody></table>
+<hr>
+<h3>19.10 Application properties</h3>
+<pre><code class="language-yaml">app:
+  auth:
+    jwt:
+      secret: ${JWT_SECRET}              # min 256-bit, env only
+      access-token-expiration: 900       # 15 minutes
+      refresh-token-expiration: 604800     # 7 days
+      issuer: marketplace-api
+    password-reset:
+      expiration: 3600                   # 1 hour
+    bcrypt-strength: 12
+  frontend:
+    buyer-url: https://shop.example.com
+    reset-password-path: /reset-password
+</code></pre>
+<hr>
+<h3>19.11 Mã lỗi Auth (error codes)</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>HTTP</th>
+<th>Mô tả</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>VALIDATION_ERROR</code></td>
+<td>400</td>
+<td>Bean validation fail</td>
+</tr>
+<tr>
+<td><code>INVALID_CREDENTIALS</code></td>
+<td>401</td>
+<td>Sai email/password</td>
+</tr>
+<tr>
+<td><code>TOKEN_EXPIRED</code></td>
+<td>401</td>
+<td>Access hoặc refresh hết hạn</td>
+</tr>
+<tr>
+<td><code>TOKEN_INVALID</code></td>
+<td>401</td>
+<td>JWT malformed / reset token sai</td>
+</tr>
+<tr>
+<td><code>UNAUTHORIZED</code></td>
+<td>401</td>
+<td>Thiếu token trên protected route</td>
+</tr>
+<tr>
+<td><code>ACCOUNT_SUSPENDED</code></td>
+<td>403</td>
+<td>User bị suspend</td>
+</tr>
+<tr>
+<td><code>FORBIDDEN</code></td>
+<td>403</td>
+<td>Thiếu role</td>
+</tr>
+<tr>
+<td><code>EMAIL_ALREADY_EXISTS</code></td>
+<td>409</td>
+<td>Email đã đăng ký</td>
+</tr>
+<tr>
+<td><code>TOO_MANY_REQUESTS</code></td>
+<td>429</td>
+<td>Rate limit</td>
+</tr>
+<tr>
+<td><code>TOKEN_REUSE_DETECTED</code></td>
+<td>401</td>
+<td>Refresh token reuse — force re-login</td>
+</tr>
+</tbody></table>
+<hr>
+<h3>19.12 Tích hợp Frontend (React)</h3>
+<h4>Auth state (Zustand hoặc React Context)</h4>
+<pre><code class="language-typescript">interface AuthState {
+  user: User | null;
+  accessToken: string | null;
+  isAuthenticated: boolean;
+  login: (email: string, password: string) =&gt; Promise&lt;void&gt;;
+  register: (data: RegisterData) =&gt; Promise&lt;void&gt;;
+  logout: () =&gt; Promise&lt;void&gt;;
+  refresh: () =&gt; Promise&lt;void&gt;;
+}
+</code></pre>
+<h4>Axios interceptor pattern</h4>
+<pre><code class="language-typescript">// Request: attach Bearer accessToken
+api.interceptors.request.use((config) =&gt; {
+  const token = authStore.getState().accessToken;
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// Response: auto-refresh on 401
+api.interceptors.response.use(
+  (res) =&gt; res,
+  async (error) =&gt; {
+    if (error.response?.status === 401 &amp;&amp; !error.config._retry) {
+      error.config._retry = true;
+      await authStore.getState().refresh();
+      return api(error.config);
+    }
+    return Promise.reject(error);
+  }
+);
+</code></pre>
+<h4>Protected routes</h4>
+<table>
+<thead>
+<tr>
+<th>App</th>
+<th>Route guard</th>
+<th>Redirect</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>buyer</td>
+<td><code>RequireAuth</code></td>
+<td><code>/login?returnUrl=</code></td>
+</tr>
+<tr>
+<td>seller</td>
+<td><code>RequireRole SELLER</code></td>
+<td><code>/seller/apply</code> hoặc <code>/login</code></td>
+</tr>
+<tr>
+<td>admin</td>
+<td><code>RequireRole ADMIN</code></td>
+<td><code>/403</code></td>
+</tr>
+</tbody></table>
+<h4>Pages Auth (buyer app)</h4>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Component</th>
+<th>UC</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>/register</code></td>
+<td>RegisterPage</td>
+<td>UC-BUY-001</td>
+</tr>
+<tr>
+<td><code>/login</code></td>
+<td>LoginPage</td>
+<td>UC-BUY-002</td>
+</tr>
+<tr>
+<td><code>/forgot-password</code></td>
+<td>ForgotPasswordPage</td>
+<td>UC-BUY-003</td>
+</tr>
+<tr>
+<td><code>/reset-password</code></td>
+<td>ResetPasswordPage</td>
+<td>UC-BUY-003</td>
+</tr>
+</tbody></table>
+<hr>
+<h3>19.13 Bảo mật bổ sung</h3>
+<table>
+<thead>
+<tr>
+<th>Mối đe dọa</th>
+<th>Biện pháp</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Brute force login</td>
+<td>Rate limit Redis + exponential delay</td>
+</tr>
+<tr>
+<td>Credential stuffing</td>
+<td>CAPTCHA sau 5 fail (P1)</td>
+</tr>
+<tr>
+<td>XSS steal token</td>
+<td>httpOnly cookie cho refresh; CSP headers</td>
+</tr>
+<tr>
+<td>CSRF</td>
+<td>SameSite=Strict cookie; CSRF token nếu cookie auth</td>
+</tr>
+<tr>
+<td>JWT theft</td>
+<td>Short TTL 15m + refresh rotation</td>
+</tr>
+<tr>
+<td>Password weak</td>
+<td>Validation + có thể tích hợp zxcvbn (P1)</td>
+</tr>
+<tr>
+<td>Email enumeration</td>
+<td>Generic message forgot-password</td>
+</tr>
+<tr>
+<td>Session fixation</td>
+<td>Token mới mỗi login</td>
+</tr>
+</tbody></table>
+<p><strong>Không làm trong MVP:</strong> OAuth2 Google/Facebook, 2FA TOTP, passkey — ghi backlog phase 2.</p>
+<hr>
+<h3>19.14 Testing checklist</h3>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Loại</th>
+<th>Mô tả</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Register happy path</td>
+<td>Integration</td>
+<td>201 + tokens + BUYER role</td>
+</tr>
+<tr>
+<td>Register duplicate email</td>
+<td>Integration</td>
+<td>409</td>
+</tr>
+<tr>
+<td>Login valid / invalid</td>
+<td>Integration</td>
+<td>200 / 401</td>
+</tr>
+<tr>
+<td>Login suspended user</td>
+<td>Integration</td>
+<td>403</td>
+</tr>
+<tr>
+<td>Access protected without token</td>
+<td>API</td>
+<td>401</td>
+</tr>
+<tr>
+<td>Access seller route as BUYER only</td>
+<td>API</td>
+<td>403</td>
+</tr>
+<tr>
+<td>Refresh rotation</td>
+<td>Integration</td>
+<td>Old refresh revoked, new works</td>
+</tr>
+<tr>
+<td>Refresh reuse detection</td>
+<td>Integration</td>
+<td>Family revoked, 401</td>
+</tr>
+<tr>
+<td>Logout invalidates refresh</td>
+<td>Integration</td>
+<td>Refresh after logout fails</td>
+</tr>
+<tr>
+<td>Forgot password sends email</td>
+<td>Integration</td>
+<td>Mock mail + token in DB</td>
+</tr>
+<tr>
+<td>Reset password revokes sessions</td>
+<td>Integration</td>
+<td>Old refresh fails</td>
+</tr>
+<tr>
+<td>JWT expiry</td>
+<td>Unit</td>
+<td>Expired token rejected</td>
+</tr>
+<tr>
+<td>Rate limit login</td>
+<td>Integration</td>
+<td>429 after 10 attempts</td>
+</tr>
+</tbody></table>
+<hr>
+<h3>19.15 Thứ tự implement (Phase 0)</h3>
+<ol>
+<li><code>User</code> entity + <code>UserRepository</code> + Flyway migration</li>
+<li><code>SecurityConfig</code> + <code>PasswordEncoder</code> + permitAll public routes</li>
+<li><code>JwtTokenProvider</code> + <code>JwtAuthFilter</code> + <code>UserDetailsServiceImpl</code></li>
+<li><code>POST /auth/register</code> + <code>POST /auth/login</code></li>
+<li>Refresh token entity + <code>POST /auth/refresh</code> + rotation</li>
+<li><code>POST /auth/logout</code></li>
+<li>Forgot/reset password + email template</li>
+<li>Rate limiting filter</li>
+<li><code>addRole()</code> cho admin approve seller</li>
+<li>React: login/register pages + axios interceptor + route guards</li>
+</ol>
+<p><strong>Definition of Done — Module Auth:</strong></p>
+<ul>
+<li><input disabled="" type="checkbox"> Register, login, logout, refresh hoạt động</li>
+<li><input disabled="" type="checkbox"> JWT bảo vệ đúng routes theo RBAC matrix</li>
+<li><input disabled="" type="checkbox"> Refresh token rotation + reuse detection</li>
+<li><input disabled="" type="checkbox"> Forgot/reset password end-to-end</li>
+<li><input disabled="" type="checkbox"> Rate limit login/register</li>
+<li><input disabled="" type="checkbox"> Unit + integration tests pass</li>
+<li><input disabled="" type="checkbox"> OpenAPI <code>auth.yaml</code> khớp implementation</li>
+</ul>
+<hr>
+<h2>20. Module Catalog — Thiết kế chi tiết</h2>
+<p>Module Catalog quản lý danh mục (admin), sản phẩm/variant/tồn kho/ảnh (seller), và API public cho buyer. Phụ thuộc <code>seller_profiles</code> (seller approved) và Auth/RBAC.</p>
+<blockquote>
+<p>Implementation skeleton: <code>marketplace/backend/src/main/java/com/marketplace/catalog/</code></p>
+</blockquote>
+<h3>20.1 Phạm vi &amp; ranh giới</h3>
+<table>
+<thead>
+<tr>
+<th>Thuộc Catalog</th>
+<th>Không thuộc Catalog</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Category tree (admin CRUD)</td>
+<td>Seller onboarding (<code>seller/</code> — phase sau)</td>
+</tr>
+<tr>
+<td>Product CRUD (seller)</td>
+<td>Cart / checkout</td>
+</tr>
+<tr>
+<td>Variant + inventory baseline</td>
+<td>Inventory reservation (cart module)</td>
+</tr>
+<tr>
+<td>Image upload</td>
+<td>Order / payment</td>
+</tr>
+<tr>
+<td>Public listing, search, PDP</td>
+<td>Admin duyệt seller</td>
+</tr>
+<tr>
+<td>Shop public page</td>
+<td>Review / rating</td>
+</tr>
+</tbody></table>
+<p><strong>Use cases:</strong> UC-GST-001/002/003, UC-SEL-003→006, UC-ADM-003/004</p>
+<h3>20.2 Database schema</h3>
+<pre><code class="language-mermaid">erDiagram
+  SellerProfile ||--o{ Product : lists
+  Category ||--o{ Product : contains
+  Product ||--o{ ProductVariant : has
+  ProductVariant ||--|| Inventory : tracks
+  Product ||--o{ ProductImage : has
+  Category ||--o{ Category : parent_of
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Bảng</th>
+<th>Mô tả</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>seller_profiles</code></td>
+<td>Shop, slug, status, currency — prerequisite</td>
+</tr>
+<tr>
+<td><code>categories</code></td>
+<td>Cây danh mục, admin quản lý</td>
+</tr>
+<tr>
+<td><code>products</code></td>
+<td>SP của seller, slug global unique, <code>search_vector</code> tsvector</td>
+</tr>
+<tr>
+<td><code>product_variants</code></td>
+<td>SKU, price, attributes JSONB</td>
+</tr>
+<tr>
+<td><code>inventory</code></td>
+<td>quantity, reserved_qty (cart module dùng sau)</td>
+</tr>
+<tr>
+<td><code>product_images</code></td>
+<td>URL, sort_order</td>
+</tr>
+</tbody></table>
+<p><strong>Visibility rule (public):</strong> <code>product.status = ACTIVE</code> AND <code>seller.status = APPROVED</code></p>
+<h3>20.3 State machine — Product</h3>
+<pre><code class="language-mermaid">stateDiagram-v2
+  [*] --&gt; draft: seller_create
+  draft --&gt; active: seller_publish
+  active --&gt; inactive: seller_unpublish
+  inactive --&gt; active: seller_republish
+  active --&gt; suspended: admin_moderate
+  suspended --&gt; active: admin_restore
+</code></pre>
+<p><strong>Publish validation:</strong> &gt;= 1 variant, &gt;= 1 image, seller approved.</p>
+<h3>20.4 API map (đã implement trong skeleton)</h3>
+<table>
+<thead>
+<tr>
+<th>UC</th>
+<th>Method</th>
+<th>Endpoint</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UC-GST-001</td>
+<td>GET</td>
+<td><code>/categories?parentId&amp;depth</code></td>
+</tr>
+<tr>
+<td>UC-GST-002</td>
+<td>GET</td>
+<td><code>/products?q&amp;categorySlug&amp;sellerSlug</code></td>
+</tr>
+<tr>
+<td>UC-GST-003</td>
+<td>GET</td>
+<td><code>/products/{slug}</code>, <code>/shops/{slug}</code></td>
+</tr>
+<tr>
+<td>UC-SEL-003</td>
+<td>POST</td>
+<td><code>/seller/products</code></td>
+</tr>
+<tr>
+<td>UC-SEL-004</td>
+<td>PATCH</td>
+<td><code>/seller/products/{id}/status</code></td>
+</tr>
+<tr>
+<td>UC-SEL-005</td>
+<td>PUT</td>
+<td><code>/seller/products/{id}/variants/{variantId}</code></td>
+</tr>
+<tr>
+<td>UC-SEL-006</td>
+<td>POST/DELETE</td>
+<td><code>/seller/products/{id}/images</code></td>
+</tr>
+<tr>
+<td>UC-ADM-003</td>
+<td>CRUD</td>
+<td><code>/admin/categories</code></td>
+</tr>
+</tbody></table>
+<h3>20.5 Package structure</h3>
+<pre><code>catalog/
+  config/       MediaResourceConfig
+  controller/   Category, Product, Shop, SellerProduct, AdminCategory
+  dto/
+  entity/
+  exception/
+  mapper/       CatalogMapper
+  repository/
+  service/      CategoryService, ProductCatalogService, SellerProductService, ShopService, AdminCategoryService
+  storage/      ImageStorageService, LocalImageStorageService
+  util/         SlugUtils
+seller/
+  entity/       SellerProfile, SellerStatus
+  repository/
+  service/      SellerContextService
+  exception/
+</code></pre>
+<h3>20.6 Luồng seller tạo &amp; publish SP</h3>
+<pre><code class="language-mermaid">sequenceDiagram
+  participant S as Seller
+  participant API as SellerProductService
+  participant DB as PostgreSQL
+  participant Store as ImageStorage
+
+  S-&gt;&gt;API: POST_seller_products
+  API-&gt;&gt;API: requireCurrentSellerProfile_APPROVED
+  API-&gt;&gt;DB: INSERT_product_draft_variants_inventory
+  S-&gt;&gt;API: POST_images
+  API-&gt;&gt;Store: storeProductImage
+  S-&gt;&gt;API: PATCH_status_active
+  API-&gt;&gt;API: validate_variants_and_images
+  API-&gt;&gt;DB: UPDATE_status_ACTIVE
+</code></pre>
+<h3>20.7 Search (MVP)</h3>
+<p>PostgreSQL <code>tsvector</code> + <code>plainto_tsquery</code> trên <code>name</code>/<code>description</code>, fallback <code>ILIKE</code>. Phase 2: Elasticsearch.</p>
+<h3>20.8 Image storage</h3>
+<table>
+<thead>
+<tr>
+<th>Môi trường</th>
+<th>Backend</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local dev</td>
+<td><code>uploads/</code> + serve <code>/media/**</code></td>
+</tr>
+<tr>
+<td>Production</td>
+<td>S3/MinIO — implement <code>S3ImageStorageService</code></td>
+</tr>
+</tbody></table>
+<h3>20.9 Testing checklist</h3>
+<ul>
+<li>Public listing chỉ hiện ACTIVE + seller APPROVED</li>
+<li>Search theo <code>q</code>, filter categorySlug/sellerSlug</li>
+<li>Seller không publish được khi thiếu ảnh/variant</li>
+<li>Seller chỉ sửa SP của shop mình (403)</li>
+<li>Admin CRUD category, không xóa category có children</li>
+<li>Slug unique globally cho product</li>
+</ul>
+<h3>20.10 Definition of Done — Module Catalog</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Flyway V2 + V3 chạy OK</li>
+<li><input disabled="" type="checkbox"> Public GET categories, products, shops</li>
+<li><input disabled="" type="checkbox"> Seller CRUD products + upload image + publish</li>
+<li><input disabled="" type="checkbox"> Admin CRUD categories</li>
+<li><input disabled="" type="checkbox"> Compile + manual smoke test</li>
+</ul>
+
+</body>
+</html>
