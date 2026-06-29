@@ -1,0 +1,32 @@
+# Backend
+backend/target/
+backend/uploads/
+backend/.idea/
+backend/*.iml
+
+# Frontend
+frontend/node_modules/
+frontend/apps/*/dist/
+frontend/packages/*/dist/
+frontend/.turbo/
+
+# E2E
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+e2e/blob-report/
+
+# IDE & OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log

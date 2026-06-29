@@ -1,0 +1,66 @@
+import i18n from 'i18next';
+import { initReactI18next } from 'react-i18next';
+
+const resources = {
+  en: {
+    translation: {
+      appName: 'Admin Panel',
+      sellers: 'Seller approvals',
+      categories: 'Categories',
+      orders: 'Orders',
+      login: 'Login',
+      logout: 'Logout',
+      approve: 'Approve',
+      reject: 'Reject',
+      create: 'Create',
+      edit: 'Edit',
+      delete: 'Delete',
+      name: 'Name',
+      slug: 'Slug',
+      save: 'Save',
+      cancel: 'Cancel',
+      loading: 'Loading...',
+      error: 'Something went wrong',
+      noSellers: 'No pending sellers',
+      noOrders: 'No orders',
+      email: 'Email',
+      password: 'Password',
+      shopName: 'Shop name',
+      status: 'Status',
+      orderNumber: 'Order #',
+      actions: 'Actions',
+    },
+  },
+  vi: {
+    translation: {
+      appName: 'Quản trị',
+      sellers: 'Duyệt người bán',
+      categories: 'Danh mục',
+      orders: 'Đơn hàng',
+      login: 'Đăng nhập',
+      logout: 'Đăng xuất',
+      approve: 'Duyệt',
+      reject: 'Từ chối',
+      create: 'Tạo mới',
+      edit: 'Sửa',
+      delete: 'Xóa',
+      name: 'Tên',
+      slug: 'Slug',
+      save: 'Lưu',
+      cancel: 'Hủy',
+      loading: 'Đang tải...',
+      error: 'Đã xảy ra lỗi',
+      noSellers: 'Không có người bán chờ duyệt',
+      noOrders: 'Không có đơn hàng',
+      email: 'Email',
+      password: 'Mật khẩu',
+      shopName: 'Tên cửa hàng',
+      status: 'Trạng thái',
+      orderNumber: 'Đơn #',
+      actions: 'Thao tác',
+    },
+  },
+};
+
+i18n.use(initReactI18next).init({ resources, lng: 'vi', fallbackLng: 'en', interpolation: { escapeValue: false } });
+export default i18n;

@@ -1,0 +1,17 @@
+{
+  "name": "marketplace-frontend",
+  "private": true,
+  "workspaces": [
+    "apps/buyer",
+    "apps/seller",
+    "apps/admin",
+    "packages/api-client",
+    "packages/ui"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:buyer": "npm run dev -w @marketplace/buyer",
+    "dev:seller": "npm run dev -w @marketplace/seller",
+    "dev:admin": "npm run dev -w @marketplace/admin"
+  }
+}

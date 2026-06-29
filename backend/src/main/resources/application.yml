@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: marketplace-api
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:marketplace}
+    username: ${DB_USER:marketplace}
+    password: ${DB_PASSWORD:marketplace}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  servlet:
+    context-path: /api/v1
+
+app:
+  auth:
+    jwt:
+      secret: ${JWT_SECRET:change-me-to-a-secret-key-at-least-256-bits-long-for-hs256}
+      access-token-expiration: 900
+      refresh-token-expiration: 604800
+      issuer: marketplace-api
+    password-reset:
+      expiration: 3600
+    bcrypt-strength: 12
+  frontend:
+    buyer-url: ${BUYER_URL:http://localhost:5173}
+    reset-password-path: /reset-password
+  storage:
+    local-dir: uploads
+    public-base-url: http://localhost:8080/api/v1/media
+  commerce:
+    cart-reservation-minutes: 30
+    order-payment-timeout-minutes: 15
+    shipping:
+      vn-flat-rate: 30000
+      global-flat-rate: 10.00
+  payment:
+    stripe:
+      api-key: ${STRIPE_API_KEY:}
+      webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+      publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+    vnpay:
+      tmn-code: ${VNPAY_TMN_CODE:}
+      hash-secret: ${VNPAY_HASH_SECRET:}
+      url: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+      return-url: ${VNPAY_RETURN_URL:http://localhost:5173/checkout/return}

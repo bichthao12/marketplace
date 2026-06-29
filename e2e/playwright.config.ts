@@ -1,0 +1,30 @@
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: 'list',
+  use: {
+    baseURL: 'http://localhost:5173',
+    trace: 'on-first-retry',
+  },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  webServer: [
+    {
+      command: 'cd ../backend && mvn -q spring-boot:run',
+      url: 'http://localhost:8080/api/v1/categories',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+    },
+    {
+      command: 'npm run dev:buyer',
+      url: 'http://localhost:5173',
+      cwd: '.',
+      reuseExistingServer: !process.env.CI,
+      timeout: 60000,
+    },
+  ],
+});
